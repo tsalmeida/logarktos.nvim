@@ -95,11 +95,28 @@ local function derive_from(base)
 	return (l < 0.5) and shift_color(base, 8) or shift_color(base, -8)
 end
 
+-- Colourscheme hint contract: a scheme may publish its preferred inactive-window
+-- tint (e.g. chromaki's per-flavour green/blue/red) via vim.g.inactive_win_bg_hint,
+-- with vim.g.inactive_win_bg_override / _force as hard overrides. Honouring these
+-- keeps the tint scheme-driven rather than auto-derived from Normal/CursorLine.
+local HINT_KEY = "inactive_win_bg_hint"
+local OVERRIDE_KEYS = { "inactive_win_bg_override", "inactive_win_bg_force" }
+
 local function pick_inactive_bg()
 	local forced = as_hex(config.options.focus and config.options.focus.inactive_bg)
+	for _, key in ipairs(OVERRIDE_KEYS) do
+		forced = forced or as_hex(vim.g[key])
+	end
 	if forced then return forced end
 
 	local normal_bg = get_hl_bg("Normal")
+
+	-- Scheme-published hint wins, as long as it isn't washed out against Normal.
+	local hint = as_hex(vim.g[HINT_KEY])
+	if hint and (not normal_bg or gently_contrasts(hint, normal_bg)) then
+		return hint
+	end
+
 	if not normal_bg then return nil end
 	for _, grp in ipairs({ "CursorLine", "StatusLine", "StatusLineNC", "Visual" }) do
 		local bg = get_hl_bg(grp)

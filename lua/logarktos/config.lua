@@ -104,7 +104,10 @@ M.defaults = {
 	focus = {
 		-- Inactive-window dimming. Colourscheme-sensitive, so off by default.
 		enabled = false,
-		-- Optional explicit inactive background (e.g. "#1c1c1c"). nil = auto-derive.
+		-- Optional explicit inactive background (e.g. "#1c1c1c"). When nil, the
+		-- tint is taken from the colourscheme's vim.g.inactive_win_bg_hint (with
+		-- vim.g.inactive_win_bg_override / _force as hard overrides) if set, and
+		-- otherwise auto-derived from Normal/CursorLine/StatusLine/Visual.
 		inactive_bg = nil,
 	},
 

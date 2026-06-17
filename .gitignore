@@ -8,3 +8,6 @@ tags
 Thumbs.db
 *.swp
 *~
+
+# Personal prompt drafts — local only, not part of the plugin
+/documents/

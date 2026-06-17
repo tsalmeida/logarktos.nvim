@@ -158,6 +158,13 @@ require("logarktos").setup({
 `:LogarktosSuggestFilename` proposes a CamelCase name from the buffer's content,
 preserving a `:LogarktosNewMarkdown` timestamp prefix when present.
 
+For notes seeded from a `template.md` (the same `markdown.template` used by
+`:LogarktosNewMarkdown`), the shared template lines are stripped before the text
+is sent, so the suggestion reflects what *you* wrote rather than the boilerplate.
+The template is found in the note's own folder, or — for archived notes — in the
+parent of an `archive/` folder. Only the first `ai.max_input_chars` characters
+(default 1000) of the trimmed text are ever sent.
+
 ## License
 
 MIT

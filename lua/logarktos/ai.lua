@@ -18,8 +18,7 @@ function M.enabled()
 	return ai_cfg().enabled == true
 end
 
-local function slice_buffer(buf, limit)
-	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, true)
+local function slice_lines(lines, limit)
 	if #lines == 0 then return "", false end
 	local parts, count, truncated = {}, 0, false
 	for i, line in ipairs(lines) do
@@ -44,6 +43,50 @@ local function slice_buffer(buf, limit)
 		end
 	end
 	return table.concat(parts), truncated
+end
+
+-- ── template-aware trimming ──────────────────────────────────────────────────
+-- :NewMarkdown can seed a note from a `template.md`. When naming such a note we
+-- strip the shared template lines first, so the model judges the file by what
+-- the *user* wrote on top of the boilerplate — otherwise every note made from
+-- the same template tends to get the same template-flavoured name.
+
+--- Locate the template that seeded `current_path`, if any. Looks in the file's
+--- own folder, and — for archived notes — in the parent of an `archive/` folder.
+local function template_for(current_path)
+	if not current_path or current_path == "" then return nil end
+	local template_name = (config.options.markdown and config.options.markdown.template) or "template.md"
+	if template_name == "" then return nil end
+	local dir = vim.fn.fnamemodify(current_path, ":h")
+	local cand = util.join(dir, template_name)
+	if util.exists(cand) then return cand end
+	if (util.basename(dir) or ""):lower() == "archive" then
+		cand = util.join(vim.fn.fnamemodify(dir, ":h"), template_name)
+		if util.exists(cand) then return cand end
+	end
+	return nil
+end
+
+--- Drop every buffer line that exactly matches a (non-blank) template line.
+--- Returns the kept lines and how many were removed.
+local function strip_template(lines, template_path)
+	local ok, tmpl = pcall(vim.fn.readfile, template_path)
+	if not ok or #tmpl == 0 then return lines, 0 end
+	local tmpl_set = {}
+	for _, l in ipairs(tmpl) do
+		local key = vim.trim(l)
+		if key ~= "" then tmpl_set[key] = true end
+	end
+	local kept, removed = {}, 0
+	for _, l in ipairs(lines) do
+		local key = vim.trim(l)
+		if key ~= "" and tmpl_set[key] then
+			removed = removed + 1
+		else
+			kept[#kept + 1] = l
+		end
+	end
+	return kept, removed
 end
 
 local function call_openai(messages)
@@ -125,24 +168,46 @@ function M.suggest_filename()
 	local buf = vim.api.nvim_get_current_buf()
 	local cfg = ai_cfg()
 	local max_chars = cfg.max_input_chars or 1000
-	local preview, truncated = slice_buffer(buf, max_chars)
+	local current_path = vim.api.nvim_buf_get_name(buf)
+
+	-- Start from the whole buffer, then drop shared template boilerplate so the
+	-- model only weighs what the user added on top of a :NewMarkdown template.
+	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, true)
+	local from_template = false
+	local tpath = template_for(current_path)
+	if tpath then
+		local kept, removed = strip_template(lines, tpath)
+		if removed > 0 then
+			local has_content = false
+			for _, l in ipairs(kept) do
+				if vim.trim(l) ~= "" then has_content = true break end
+			end
+			-- Only adopt the trimmed text when something the user wrote remains;
+			-- otherwise fall back to the full buffer rather than send nothing.
+			if has_content then lines, from_template = kept, true end
+		end
+	end
+
+	local preview, truncated = slice_lines(lines, max_chars)
 	if preview == "" then
 		util.notify("Buffer is empty — nothing to analyze.", vim.log.levels.WARN, "SuggestFilename")
 		return
 	end
 
-	local current_path = vim.api.nvim_buf_get_name(buf)
 	local system_prompt = table.concat({
 		"You suggest concise CamelCase file names.",
 		"Respond with a single ASCII alphanumeric token.",
 		"Do not include file extensions or additional commentary.",
 		"Keep the name readable, descriptive, and at most 60 characters.",
 	}, " ")
+	local origin = from_template
+		and "the user-written portion of a note (shared template boilerplate removed)"
+		or "the beginning of a file"
 	local qualifier = truncated and " (truncated)" or ""
 	local escaped_preview = preview:gsub("%%", "%%%%")
 	local user_prompt = string.format(
-		"The following text is the beginning of a file%s (first %d characters):\n\n%s\n\nProvide a CamelCase filename (no extension). Reply with only the proposed name.",
-		qualifier, max_chars, escaped_preview)
+		"The following text is %s%s (up to %d characters):\n\n%s\n\nProvide a CamelCase filename (no extension). Reply with only the proposed name.",
+		origin, qualifier, max_chars, escaped_preview)
 
 	local reply, model = call_openai({
 		{ role = "system", content = system_prompt },

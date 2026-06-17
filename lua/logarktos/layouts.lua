@@ -319,4 +319,21 @@ function M.large_triplicate_tab()
 	require("logarktos.triplicate").open_new_tab({ large = true })
 end
 
+-- Re-even the current tab's columns after they've drifted out of shape.
+--   • two columns      → equal halves
+--   • three columns    → equal thirds (Triple/Triplicate proportions)
+--   • a column Work mode split in two → its stacked halves balanced too
+-- :wincmd = equalises every window regardless of 'equalalways', so it restores
+-- even columns and rebalances any vertical split without flattening it.
+function M.fix_layout()
+	local tab = vim.api.nvim_get_current_tabpage()
+	local layout = vim.fn.winlayout(tab)
+	local cols = (layout[1] == "row") and #layout[2] or 1
+
+	vim.cmd("wincmd =")
+
+	util.notify(("Layout evened (%d column%s)"):format(cols, cols == 1 and "" or "s"),
+		vim.log.levels.INFO, "FixLayout")
+end
+
 return M

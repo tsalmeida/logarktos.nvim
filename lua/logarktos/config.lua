@@ -17,6 +17,7 @@ M.default_keymaps = {
 	dual                = "<leader>dm",
 	focus               = "<leader>fm",
 	focus_toggle        = "<leader>fo",
+	fix_layout          = "<leader>fl",
 	-- tabs
 	tab_rename          = "<leader>tn",
 	tab_name_from_dir   = "<leader>tN",

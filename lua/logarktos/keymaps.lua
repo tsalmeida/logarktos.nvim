@@ -31,6 +31,7 @@ local function actions()
 		dual                = { "n", function() L().dual_mode_tab() end, "Dual synced views" },
 		focus               = { "n", function() L().focus_mode_tab() end, "Focus layout" },
 		focus_toggle        = { "n", function() L().focus_toggle() end, "Toggle inactive dimming" },
+		fix_layout          = { "n", function() L().fix_layout() end, "Fix layout (even columns)" },
 
 		-- tabs
 		tab_rename          = { "n", function() T().rename_prompt() end, "Rename tab" },

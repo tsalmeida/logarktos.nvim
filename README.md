@@ -70,6 +70,7 @@ bufferfiles = {
 | `:LogarktosWork` / `:LogarktosHereWork` | editor plus two terminals (new tab / current tab) |
 | `:LogarktosTriple` / `:LogarktosDual` | synchronized views of the same buffer |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
+| `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |
 
 ### Smart tab names
 

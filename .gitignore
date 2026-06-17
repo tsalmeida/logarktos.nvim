@@ -1,0 +1,10 @@
+# Neovim / Lua
+*.luac
+.luarc.json
+tags
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~

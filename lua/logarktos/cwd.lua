@@ -11,8 +11,8 @@ local M = {}
 local function project_root_for(path)
 	path = path or vim.fn.expand("%:p")
 	local start = (vim.fn.isdirectory(path) == 1) and path or vim.fn.fnamemodify(path, ":p:h")
-	local found = vim.fs.find({ ".git", "package.json", "artisan", "composer.json" }, { path = start, upward = true })
-	return (#found > 0) and vim.fs.dirname(found[1]) or start
+	-- Fall back to the starting folder so Root mode always pins *somewhere*.
+	return util.project_root(path) or start
 end
 
 --- Pin the window-local cwd to the current buffer's directory (Local mode).

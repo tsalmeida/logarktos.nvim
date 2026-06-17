@@ -111,15 +111,8 @@ local function basename(dir)
 end
 
 local function project_root_name(start_path)
-	local start = start_path or vim.fn.getcwd(-1, 0)
-	local found = vim.fs.find({ ".git", "package.json", "artisan", "composer.json" }, {
-		path = start,
-		upward = true,
-	})
-	if #found > 0 then
-		return vim.fn.fnamemodify(vim.fs.dirname(found[1]), ":t")
-	end
-	return nil
+	local root = require("logarktos.util").project_root(start_path or vim.fn.getcwd(-1, 0))
+	return root and vim.fn.fnamemodify(root, ":t") or nil
 end
 
 local function oil_dir_in_tab(tab)
@@ -176,6 +169,18 @@ function M.name_from_dir(dir)
 	return basename(dir)
 end
 
+--- The git-aware folder name to offer when (re)naming a tab: the basename of
+--- the project root the current buffer lives in (so a deep subfolder still
+--- yields the project's name), or the buffer's own folder when it's not in a
+--- project. Returned verbatim (uncapped) — it seeds an editable prompt.
+function M.current_dir_name(dir)
+	dir = dir or require("logarktos.util").resolve_cwd(0)
+	if not dir or dir == "" then return nil end
+	local proj = project_root_name(dir)
+	if proj and proj ~= "" then return proj end
+	return basename(dir)
+end
+
 function M.suggest_name(opts)
 	opts = opts or {}
 	if opts.layout then
@@ -219,10 +224,12 @@ function M.clear_current()
 	M.clear(vim.api.nvim_get_current_tabpage())
 end
 
---- Interactive rename (prompt, locks the name as manual).
+--- Interactive rename (prompt, locks the name as manual). The default is the
+--- git-aware folder name (project root when in a project) rather than the tab's
+--- current name — that's far more likely to be what you want to type.
 function M.rename_prompt()
-	local cur = M.get() or ""
-	vim.ui.input({ prompt = "Tab name: ", default = cur }, function(input)
+	local default = M.current_dir_name() or M.get() or ""
+	vim.ui.input({ prompt = "Tab name: ", default = default }, function(input)
 		if input == nil then return end
 		if input ~= "" then M.set_manual(input) else M.clear_current() end
 	end)

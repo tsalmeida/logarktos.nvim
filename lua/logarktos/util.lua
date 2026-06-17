@@ -80,6 +80,37 @@ function M.basename(path)
 	return vim.fn.fnamemodify(path, ":t")
 end
 
+-- ── project / git awareness ──────────────────────────────────────────────────
+-- Files/dirs that mark the root of a project. `.git` (and the other VCS dirs)
+-- come first so version-controlled projects win; the rest catch common
+-- non-git layouts. `.root` is an explicit escape hatch users can drop anywhere.
+M.root_markers = {
+	".git", ".hg", ".svn",
+	"package.json", "pyproject.toml", "Cargo.toml", "go.mod",
+	"composer.json", "artisan", ".root",
+}
+
+--- The project root directory containing `path`, or nil when none is found.
+--- `path` may be a file or a directory; the search walks upward from it.
+function M.project_root(path)
+	path = path or vim.fn.expand("%:p")
+	if not path or path == "" then return nil end
+	local start = M.is_dir(path) and path or vim.fn.fnamemodify(path, ":p:h")
+	local found = vim.fs.find(M.root_markers, { path = start, upward = true })
+	if #found > 0 then return vim.fs.dirname(found[1]) end
+	return nil
+end
+
+--- The git-aware basename for `path`: the project root's folder name when
+--- `path` lives inside a project, else the folder's own basename.
+function M.project_or_dir_name(path)
+	if not path or path == "" then return nil end
+	local root = M.project_root(path)
+	if root then return M.basename(root) end
+	local dir = M.is_dir(path) and path or vim.fn.fnamemodify(path, ":p:h")
+	return M.basename(dir)
+end
+
 -- ── environment ────────────────────────────────────────────────────────────
 function M.getenv_trim(name)
 	local v = vim.env[name]

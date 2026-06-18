@@ -38,6 +38,13 @@ local function get_tab(tab)
 	return tab or vim.api.nvim_get_current_tabpage()
 end
 
+-- Force the tabline to repaint now. Neovim only redraws it on its own events,
+-- so a programmatic rename (e.g. :TabRename) otherwise lags until the next
+-- buffer/window change. Cheap and a no-op when no tabline is shown.
+local function redraw()
+	pcall(vim.cmd, "redrawtabline")
+end
+
 function M.truncate(name)
 	if type(name) ~= "string" then return name end
 	name = vim.trim(name)
@@ -72,6 +79,7 @@ function M.set(tab, name, opts)
 	else
 		pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_name_locked")
 	end
+	redraw()
 end
 
 function M.clear(tab)
@@ -79,6 +87,7 @@ function M.clear(tab)
 	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_name")
 	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_name_priority")
 	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_name_locked")
+	redraw()
 end
 
 function M.is_locked(tab)

@@ -122,10 +122,9 @@ function M.markdown_archive()
 		return
 	end
 
-	vim.api.nvim_buf_set_name(buf, dest)
-	if vim.b[buf].bufferfile_assigned then vim.b[buf].bufferfile_path = dest end
-	vim.api.nvim_buf_call(buf, function() vim.cmd("silent! edit!") end)
-
+	-- Land in the original folder via Oil so the archived file drops out of view,
+	-- rather than following the file into archive/.
+	util.open_dir(dir)
 	util.refresh_oil()
 	util.notify("Archived " .. util.relpath(dest, dir), vim.log.levels.INFO, "MarkdownArchive")
 end

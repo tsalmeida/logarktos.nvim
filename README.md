@@ -87,7 +87,8 @@ names with a ● for meaningful ones.
 current Oil directory (or cwd), optionally seeded from a `template.md` found
 there (a `# Title` placeholder is replaced with your title).
 `:LogarktosMarkdownArchive` tucks the current file, unchanged, into an
-`archive/` subfolder.
+`archive/` subfolder, then drops you into a refreshed Oil view of the original
+folder so the file disappears from the listing.
 
 ### Organize
 

@@ -77,6 +77,10 @@ end
 
 function M.basename(path)
 	if not path or path == "" then return nil end
+	-- Oil (and some callers) hand us directories with a trailing slash, on which
+	-- fnamemodify(..., ":t") returns "" — strip them so we get the real tail.
+	path = path:gsub("[\\/]+$", "")
+	if path == "" then return nil end
 	return vim.fn.fnamemodify(path, ":t")
 end
 

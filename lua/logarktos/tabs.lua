@@ -107,6 +107,9 @@ function M.apply_heading(name) return M.apply(nil, name, P.heading) end
 -- ── name generators ─────────────────────────────────────────────────────────
 local function basename(dir)
 	if not dir or dir == "" then return nil end
+	-- Strip trailing slashes (Oil dirs carry one) so :t yields the real tail.
+	dir = dir:gsub("[\\/]+$", "")
+	if dir == "" then return nil end
 	return vim.fn.fnamemodify(dir, ":t")
 end
 

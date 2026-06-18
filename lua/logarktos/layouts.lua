@@ -13,11 +13,6 @@ local util = require("logarktos.util")
 
 local M = {}
 
-local function basename(dir)
-	if not dir or dir == "" then return nil end
-	return vim.fn.fnamemodify(dir, ":t")
-end
-
 --- Name a freshly-built layout tab from its focus buffer.
 local function name_layout_tab(buf, layout_opts)
 	if buf and vim.api.nvim_buf_is_valid(buf) then
@@ -27,7 +22,7 @@ local function name_layout_tab(buf, layout_opts)
 			return
 		end
 		if vim.bo[buf].filetype == "oil" then
-			local folder = basename(util.oil_dir(buf))
+			local folder = util.project_or_dir_name(util.oil_dir(buf))
 			if folder and folder ~= "" then
 				tabs.apply_folder(folder)
 				return
@@ -225,7 +220,11 @@ function M.here_work_mode()
 	vim.api.nvim_set_current_win(left_win)
 	vim.cmd("wincmd =")
 
-	local folder = basename(cwd or vim.fn.getcwd())
+	-- HereWork transforms the current tab in place, so it must (re)name it from
+	-- the buffer we started on. Prefer the git-aware project-root name (so a deep
+	-- file or an Oil listing inside RunningWild/ names the tab "RunningWild"),
+	-- falling back to the plain folder name when we're not inside a project.
+	local folder = util.project_or_dir_name(cwd or vim.fn.getcwd())
 	if folder and folder ~= "" then tabs.apply_folder(folder) end
 end
 

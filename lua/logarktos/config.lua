@@ -11,6 +11,7 @@ M.default_keymaps = {
 	triplicate_large    = "<leader>lt",
 	large               = "<leader>lm",
 	new_large           = "<leader>nl",
+	ai_mode             = "<leader>am",
 	work                = "<leader>wm",
 	here_work           = "<leader>hw",
 	triple              = "<leader>tm",

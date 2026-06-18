@@ -314,6 +314,54 @@ function M.new_large_tab()
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "large" })
 end
 
+--- AI mode: three columns. The left one is a terminal for your AI CLI, one
+--- width-step wider than an even third, and the cursor lands there in insert
+--- mode so you can type straight away. The centre shows the PWD's
+--- documents/prompts/ folder in Oil when it exists (else the PWD itself), and
+--- the right always shows the PWD in Oil.
+function M.ai_mode_tab()
+	local cwd = util.resolve_cwd(vim.api.nvim_get_current_buf())
+	local base = cwd or vim.fn.getcwd()
+	local prompts = util.join(base, "documents", "prompts")
+	local center_dir = util.is_dir(prompts) and prompts or base
+
+	vim.cmd("tabnew")
+	local mid = vim.api.nvim_get_current_win()
+	vim.cmd("leftabove vnew")
+	local left = vim.api.nvim_get_current_win()
+	vim.api.nvim_set_current_win(mid)
+	vim.cmd("rightbelow vnew") -- the third (right) column
+	local right = vim.api.nvim_get_current_win()
+
+	vim.api.nvim_set_current_win(mid)
+	util.open_dir(center_dir)
+	vim.api.nvim_set_current_win(right)
+	util.open_dir(base)
+
+	open_term(left, cwd)
+
+	-- The terminal and centre columns share the same width (an even third plus
+	-- one right-arrow width-step, "+10"); the right Oil column takes whatever is
+	-- left, so it ends up the narrowest of the three.
+	local wide = math.floor(vim.o.columns / 3) + 10
+	vim.api.nvim_win_set_width(left, wide)
+	vim.api.nvim_win_set_width(mid, wide)
+
+	-- Name the tab the same git-aware way HereWork does: the project-root folder
+	-- name when the PWD is inside a project, else the plain folder name.
+	local folder = util.project_or_dir_name(base)
+	if folder and folder ~= "" then tabs.apply_folder(folder) end
+
+	-- Land in the terminal, ready to type. Deferred so the layout has settled
+	-- before we enter Terminal-Job (insert) mode.
+	vim.schedule(function()
+		if vim.api.nvim_win_is_valid(left) then
+			vim.api.nvim_set_current_win(left)
+			vim.cmd("startinsert")
+		end
+	end)
+end
+
 function M.large_triplicate_tab()
 	require("logarktos.triplicate").open_new_tab({ large = true })
 end

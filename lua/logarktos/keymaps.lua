@@ -25,6 +25,7 @@ local function actions()
 		triplicate_large    = { "n", function() TRI().open_new_tab({ large = true }) end, "Triplicate (large)" },
 		large               = { "n", function() L().large_mode_tab() end, "Large layout" },
 		new_large           = { "n", function() L().new_large_tab() end, "Large layout (3 empty)" },
+		ai_mode             = { "n", function() L().ai_mode_tab() end, "AI layout (terminal + 2 scratch)" },
 		work                = { "n", function() L().work_mode_tab() end, "Work layout" },
 		here_work           = { "n", function() L().here_work_mode() end, "Here Work layout" },
 		triple              = { "n", function() L().triple_mode_tab() end, "Triple synced views" },

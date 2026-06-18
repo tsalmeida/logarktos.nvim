@@ -32,6 +32,7 @@ local function specs()
 		{ "TriplicateLarge", nil, function() triplicate().open_new_tab({ large = true }) end, { desc = "Triplicate (large)" } },
 		{ "Large", nil, function() layouts().large_mode_tab() end, { desc = "Large layout tab" } },
 		{ "NewLarge", nil, function() layouts().new_large_tab() end, { desc = "Large layout tab (3 empty)" } },
+		{ "AIMode", "AIMode", function() layouts().ai_mode_tab() end, { desc = "AI layout (wide terminal + 2 scratch columns)" } },
 		{ "Work", nil, function() layouts().work_mode_tab() end, { desc = "Work layout (editor + 2 terminals)" } },
 		{ "HereWork", nil, function() layouts().here_work_mode() end, { desc = "Work layout in the current tab" } },
 		{ "Triple", nil, function() layouts().triple_mode_tab() end, { desc = "Triple synced views" } },

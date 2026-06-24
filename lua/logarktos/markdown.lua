@@ -72,8 +72,6 @@ function M.new_markdown(opts)
 		end
 
 		if pcall(vim.fn.writefile, contents, path) then
-			util.refresh_oil()
-
 			-- Surface the title as a soft "note" tab name when one was given.
 			if title ~= "" then
 				require("logarktos.tabs").apply_note(title)
@@ -81,7 +79,10 @@ function M.new_markdown(opts)
 
 			if used_template then
 				-- A template was applied: open the note straight away rather
-				-- than just landing on it in the Oil listing.
+				-- than just landing on it in the Oil listing. NB: we do NOT
+				-- refresh Oil here — we're leaving it, and Oil's async reload
+				-- would land on this new window afterwards and clobber the
+				-- file's filetype and window options (wrap, conceal, syntax).
 				vim.cmd.edit(vim.fn.fnameescape(path))
 				if focus then
 					-- Drop the cursor where the marker sat, centre the line
@@ -102,7 +103,9 @@ function M.new_markdown(opts)
 					end
 				end
 			elseif vim.bo.filetype == "oil" then
-				-- No template: in Oil, place the cursor on the new file's name stem.
+				-- No template: stay in Oil, refresh the listing, and place the
+				-- cursor on the new file's name stem.
+				util.refresh_oil()
 				vim.schedule(function()
 					local pos = vim.fn.searchpos("\\V" .. filename, "Wn")
 					if pos[1] ~= 0 then

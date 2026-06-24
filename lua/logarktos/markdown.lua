@@ -178,6 +178,10 @@ function M.markdown_archive()
 	-- which is reliable for an already-loaded, visible buffer.
 	local wiped = util.wipe_oil_dir(dir)
 	util.open_dir(dir)
+	-- For a hidden buffer the wipe gives an instant fresh reload; for one still
+	-- displayed (a split) we can't wipe, so nudge a refresh. Either way Oil's
+	-- watch_for_changes is the reliable backstop -- it reloads the listing when
+	-- the file moves on disk, regardless of this refresh's timing.
 	if not wiped then util.refresh_oil() end
 	util.notify("Archived " .. util.relpath(dest, dir), vim.log.levels.INFO, "MarkdownArchive")
 end

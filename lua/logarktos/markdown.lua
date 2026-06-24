@@ -41,7 +41,9 @@ function M.new_markdown(opts)
 
 		local template_name = config.options.markdown.template or "template.md"
 		local template_path = util.join(dir, template_name)
+		local marker = config.options.markdown.focus_marker or ""
 		local contents, used_template = {}, false
+		local focus -- { row = <1-based line>, col = <0-based byte col> } once found
 		if template_name ~= "" and uv.fs_stat(template_path) then
 			local ok_read, lines = pcall(vim.fn.readfile, template_path)
 			if ok_read then
@@ -50,6 +52,18 @@ function M.new_markdown(opts)
 					for i, line in ipairs(contents) do
 						if line == "# Title" then
 							contents[i] = "# " .. title
+							break
+						end
+					end
+				end
+				-- Locate the writing-focus marker, strip it from the line, and
+				-- remember where it sat so we can land the cursor there.
+				if marker ~= "" then
+					for i, line in ipairs(contents) do
+						local s = line:find(marker, 1, true)
+						if s then
+							contents[i] = line:sub(1, s - 1) .. line:sub(s + #marker)
+							focus = { row = i, col = s - 1 }
 							break
 						end
 					end
@@ -65,8 +79,30 @@ function M.new_markdown(opts)
 				require("logarktos.tabs").apply_note(title)
 			end
 
-			-- In an Oil buffer, place the cursor on the new file's name stem.
-			if vim.bo.filetype == "oil" then
+			if used_template then
+				-- A template was applied: open the note straight away rather
+				-- than just landing on it in the Oil listing.
+				vim.cmd.edit(vim.fn.fnameescape(path))
+				if focus then
+					-- Drop the cursor where the marker sat, centre the line
+					-- (zz), and start typing there.
+					local win = vim.api.nvim_get_current_win()
+					local buf = vim.api.nvim_win_get_buf(win)
+					local row = math.min(focus.row, vim.api.nvim_buf_line_count(buf))
+					local line = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
+					if focus.col >= #line then
+						-- Marker sat at the end of its line: append there.
+						vim.api.nvim_win_set_cursor(win, { row, math.max(#line - 1, 0) })
+						vim.cmd("normal! zz")
+						vim.cmd("startinsert!")
+					else
+						vim.api.nvim_win_set_cursor(win, { row, focus.col })
+						vim.cmd("normal! zz")
+						vim.cmd("startinsert")
+					end
+				end
+			elseif vim.bo.filetype == "oil" then
+				-- No template: in Oil, place the cursor on the new file's name stem.
 				vim.schedule(function()
 					local pos = vim.fn.searchpos("\\V" .. filename, "Wn")
 					if pos[1] ~= 0 then
@@ -76,7 +112,7 @@ function M.new_markdown(opts)
 					end
 				end)
 			else
-				-- Outside Oil, just open the note.
+				-- No template, outside Oil: just open the note.
 				vim.cmd.edit(vim.fn.fnameescape(path))
 			end
 			util.notify("Created " .. filename .. (used_template and (" (from " .. template_name .. ")") or ""))

@@ -126,6 +126,9 @@ M.defaults = {
 		template = "template.md",
 		-- os.date() format for the timestamp prefix of new notes.
 		timestamp = "%Y%m%d - %H%M%S",
+		-- Marker in template.md that pins where typing should start: it is
+		-- stripped on creation and the cursor drops there in insert mode.
+		focus_marker = "*template_focus*",
 	},
 
 	organize = {

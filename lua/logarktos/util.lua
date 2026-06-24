@@ -174,6 +174,32 @@ function M.refresh_oil()
 	end
 end
 
+--- Drop a cached (hidden) Oil buffer for `dir` so the next visit reloads the
+--- directory from disk. Oil keeps buffers with bufhidden=hide, so a buffer that
+--- was listed before a filesystem change keeps showing the stale listing on
+--- return; refreshing such a reused buffer in place races with Oil's async
+--- load and can be swallowed. Wiping it is the reliable cure. Safe no-op when
+--- Oil isn't loaded, no such buffer exists, it has unsaved Oil edits, or it is
+--- still displayed in a window (where wiping would be disruptive).
+--- Returns true when a buffer was actually wiped.
+function M.wipe_oil_dir(dir)
+	if not dir or dir == "" then return false end
+	local oil = M.oil()
+	if not oil or not oil.get_url_for_path then return false end
+	local ok, url = pcall(oil.get_url_for_path, dir, false)
+	if not ok or not url or url == "" then return false end
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.api.nvim_buf_is_valid(buf)
+			and vim.api.nvim_buf_get_name(buf) == url
+			and not vim.bo[buf].modified
+			and #vim.fn.win_findbuf(buf) == 0
+		then
+			return (pcall(vim.api.nvim_buf_delete, buf, { force = false }))
+		end
+	end
+	return false
+end
+
 --- Resolve a working directory from a buffer: Oil dir → file's dir → cwd.
 function M.resolve_cwd(buf)
 	buf = buf or vim.api.nvim_get_current_buf()

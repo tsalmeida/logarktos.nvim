@@ -82,12 +82,10 @@ function M.new_markdown(opts)
 				-- than just landing on it in the Oil listing. NB: we do NOT
 				-- refresh Oil in place here — its async reload would land on
 				-- this new window afterwards and clobber the file's filetype
-				-- and window options (wrap, conceal, syntax). Instead, remember
-				-- the Oil buffer we're leaving and wipe it once hidden, so a
-				-- later return to Oil reloads the directory fresh (Oil keeps
-				-- hidden buffers with bufhidden=hide, which would otherwise show
-				-- a stale listing missing the file we just created).
-				local oil_buf = (vim.bo.filetype == "oil") and vim.api.nvim_get_current_buf() or nil
+				-- and window options (wrap, conceal, syntax). Instead we wipe
+				-- the Oil buffer we're leaving (see below) so a later return to
+				-- Oil reloads the directory fresh and shows the new file.
+				local came_from_oil = vim.bo.filetype == "oil"
 
 				vim.cmd.edit(vim.fn.fnameescape(path))
 				if focus then
@@ -110,16 +108,8 @@ function M.new_markdown(opts)
 				end
 
 				-- Drop the stale Oil buffer now that we've left it, so the next
-				-- visit reloads the directory and shows the new file. Only when
-				-- it's truly hidden and unmodified (no pending Oil edits).
-				if oil_buf
-					and vim.api.nvim_buf_is_valid(oil_buf)
-					and vim.api.nvim_get_current_buf() ~= oil_buf
-					and not vim.bo[oil_buf].modified
-					and #vim.fn.win_findbuf(oil_buf) == 0
-				then
-					pcall(vim.api.nvim_buf_delete, oil_buf, { force = false })
-				end
+				-- visit reloads the directory and shows the new file.
+				if came_from_oil then util.wipe_oil_dir(dir) end
 			elseif vim.bo.filetype == "oil" then
 				-- No template: stay in Oil, refresh the listing, and place the
 				-- cursor on the new file's name stem.
@@ -179,10 +169,16 @@ function M.markdown_archive()
 		return
 	end
 
-	-- Land in the original folder via Oil so the archived file drops out of view,
-	-- rather than following the file into archive/.
+	-- Land in the original folder via Oil so the archived file drops out of
+	-- view, rather than following the file into archive/. Drop any cached Oil
+	-- buffer for that folder first so the reopen reloads from disk: refreshing
+	-- a reused hidden buffer in place races with Oil's async load and could
+	-- leave the moved file visible until a manual :e!. If the buffer is still
+	-- displayed (a split), we can't wipe it — fall back to an in-place refresh,
+	-- which is reliable for an already-loaded, visible buffer.
+	local wiped = util.wipe_oil_dir(dir)
 	util.open_dir(dir)
-	util.refresh_oil()
+	if not wiped then util.refresh_oil() end
 	util.notify("Archived " .. util.relpath(dest, dir), vim.log.levels.INFO, "MarkdownArchive")
 end
 

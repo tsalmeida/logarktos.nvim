@@ -9,6 +9,40 @@ local ensure_dir = util.ensure_dir
 local unique_path = util.unique_path
 local relpath = util.relpath
 
+-- ── Windows PowerShell batch helper ───────────────────────────────────────────
+-- Run one PowerShell process over a whole list of paths, fed via a temp file +
+-- env var so neither the command line length nor the console code page can
+-- mangle paths with spaces or non-ASCII characters. `preamble` runs once before
+-- the loop; `body` is the per-path PowerShell (the current path is in `$p`) and
+-- must emit exactly one stdout line per result. Returns stdout on success, or
+-- nil (non-Windows, or any spawn/exec failure) so callers can fall back. One
+-- process for the entire batch keeps this fast even on folders of hundreds of
+-- files, where a per-file PowerShell spawn would be painfully slow.
+local function ps_over_paths(paths, env_name, preamble, body)
+	if not util.is_windows or #paths == 0 then return nil end
+	local listfile = vim.fn.tempname()
+	if vim.fn.writefile(paths, listfile) ~= 0 then return nil end
+	local ps = (vim.fn.executable("pwsh") == 1) and "pwsh" or "powershell"
+	local script = table.concat({
+		"$ErrorActionPreference='SilentlyContinue'",
+		"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8",
+		preamble or "",
+		"foreach($p in (Get-Content -LiteralPath $env:" .. env_name .. " -Encoding UTF8)){",
+		"if([string]::IsNullOrWhiteSpace($p)){continue}",
+		body,
+		"}",
+	}, "\n")
+	local ok, res = pcall(function()
+		return vim
+			.system({ ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script },
+				{ env = { [env_name] = listfile }, text = true })
+			:wait()
+	end)
+	pcall(vim.fn.delete, listfile)
+	if not ok or not res or res.code ~= 0 then return nil end
+	return res.stdout or ""
+end
+
 --- The directory to operate on: Oil dir → current file's dir → cwd.
 local function work_dir()
 	if vim.bo.filetype == "oil" then
@@ -252,34 +286,84 @@ local function get_media_dim(path)
 	return from_ffprobe() or from_identify()
 end
 
-function M.organize_images()
-	if vim.fn.executable("ffprobe") ~= 1 and vim.fn.executable("identify") ~= 1 then
-		util.notify("OrganizeImages needs `ffprobe` (FFmpeg) or `identify` (ImageMagick) on PATH.",
-			vim.log.levels.ERROR)
-		return
+-- Read image pixel dimensions for many files in a single batched .NET call —
+-- no FFmpeg/ImageMagick needed for the common raster formats (jpg/png/bmp/gif/
+-- tiff). Returns map[path] = { w, h }. Formats System.Drawing can't decode
+-- (notably webp/webm) simply don't appear, so the caller falls back to
+-- ffprobe/identify for those.
+local function dims_via_dotnet(paths)
+	local out = ps_over_paths(
+		paths,
+		"LOGK_IMGLIST",
+		"Add-Type -AssemblyName System.Drawing",
+		[[try{$i=[System.Drawing.Image]::FromFile($p);[Console]::Out.WriteLine(('{0} {1} {2}' -f $i.Width,$i.Height,$p));$i.Dispose()}catch{}]]
+	)
+	local result = {}
+	if not out then return result end
+	for line in out:gmatch("[^\r\n]+") do
+		local w, h, p = line:match("^(%d+)%s+(%d+)%s+(.+)$")
+		if w and h and p then result[p] = { tonumber(w), tonumber(h) } end
 	end
-	local dir = work_dir()
-	local buckets = {
-		square = util.join(dir, "square"),
-		portrait = util.join(dir, "portrait"),
-		landscape = util.join(dir, "landscape"),
-	}
-	for _, b in pairs(buckets) do ensure_dir(b) end
+	return result
+end
 
+function M.organize_images()
+	local dir = work_dir()
+
+	-- Collect candidate images first so their dimensions can be resolved in one
+	-- batched pass rather than spawning a tool per file.
+	local images = {}
 	local handle = uv.fs_scandir(dir)
 	if not handle then return end
-	local moved = 0
 	while true do
 		local name, t = uv.fs_scandir_next(handle)
 		if not name then break end
 		local ext = name:match("%.([^.]+)$")
 		if t == "file" and ext and IMAGE_EXTS[ext:lower()] then
-			local source = util.join(dir, name)
-			local w, h = get_media_dim(source)
-			if w and h then
-				local bucket = (w == h) and buckets.square or (w > h and buckets.landscape or buckets.portrait)
-				if uv.fs_rename(source, unique_path(util.join(bucket, name))) then moved = moved + 1 end
-			end
+			table.insert(images, { name = name, path = util.join(dir, name) })
+		end
+	end
+	if #images == 0 then
+		util.notify("No images sorted")
+		return
+	end
+
+	-- Resolve dimensions: one batched System.Drawing call on Windows (zero extra
+	-- dependencies for jpg/png/bmp/gif/tiff), then ffprobe/identify per file for
+	-- anything it couldn't decode (e.g. webp/webm).
+	local paths = {}
+	for _, im in ipairs(images) do table.insert(paths, im.path) end
+	local dims = dims_via_dotnet(paths)
+
+	-- We only need an external tool when System.Drawing left some images
+	-- unmeasured. Off Windows it's the only option, so the old hard requirement
+	-- still applies there.
+	local need_fallback = false
+	for _, im in ipairs(images) do
+		if not dims[im.path] then need_fallback = true break end
+	end
+	if need_fallback and not util.is_windows
+		and vim.fn.executable("ffprobe") ~= 1 and vim.fn.executable("identify") ~= 1 then
+		util.notify("OrganizeImages needs `ffprobe` (FFmpeg) or `identify` (ImageMagick) on PATH.",
+			vim.log.levels.ERROR)
+		return
+	end
+
+	local buckets = {
+		square = util.join(dir, "square"),
+		portrait = util.join(dir, "portrait"),
+		landscape = util.join(dir, "landscape"),
+	}
+
+	local moved = 0
+	for _, im in ipairs(images) do
+		local d = dims[im.path]
+		local w, h
+		if d then w, h = d[1], d[2] else w, h = get_media_dim(im.path) end
+		if w and h then
+			local bucket = (w == h) and buckets.square or (w > h and buckets.landscape or buckets.portrait)
+			ensure_dir(bucket) -- create lazily so unmatched runs don't leave empty folders
+			if uv.fs_rename(im.path, unique_path(util.join(bucket, im.name))) then moved = moved + 1 end
 		end
 	end
 	if moved > 0 then
@@ -470,12 +554,44 @@ function M.recent10(args)
 end
 
 -- ── Separate Duplicates ──────────────────────────────────────────────────────
+-- Full-content SHA-256 for many files in a single batched Get-FileHash call.
+-- Get-FileHash streams the file in .NET, so even multi-GB videos hash without
+-- blowing up memory. Returns map[path] = hash (uppercase hex).
+local function hashes_via_powershell(paths)
+	local out = ps_over_paths(
+		paths,
+		"LOGK_HASHLIST",
+		nil,
+		[[try{$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash;[Console]::Out.WriteLine("$h $p")}catch{}]]
+	)
+	local result = {}
+	if not out then return result end
+	for line in out:gmatch("[^\r\n]+") do
+		local h, p = line:match("^(%x+)%s+(.+)$")
+		if h and p then result[p] = h end
+	end
+	return result
+end
+
+-- Off Windows (or if the batched PowerShell call couldn't hash a given file),
+-- hash its full contents in-process as a fallback.
+local function hash_file_lua(path)
+	local f = io.open(path, "rb")
+	if not f then return nil end
+	local data = f:read("*a")
+	f:close()
+	return data and vim.fn.sha256(data) or nil
+end
+
 function M.separate_duplicates()
 	local dir = work_dir()
 	local handle = uv.fs_scandir(dir)
 	if not handle then return end
 
-	local groups = {}
+	-- 1) Group by size — a cheap pre-filter. Byte-identical files must share a
+	--    size, so anything alone in its size bucket can never be a duplicate and
+	--    is never hashed.
+	local by_size = {}
 	while true do
 		local name, t = uv.fs_scandir_next(handle)
 		if not name then break end
@@ -485,26 +601,48 @@ function M.separate_duplicates()
 			local full = util.join(dir, name)
 			local stat = uv.fs_stat(full)
 			if stat then
-				local preview = ""
-				local f = io.open(full, "rb")
-				if f then
-					preview = f:read(2048) or ""
-					if stat.size > 4096 then
-						f:seek("end", -2048)
-						preview = preview .. (f:read(2048) or "")
-					end
-					f:close()
-				end
-				local key = (stat.size or 0) .. "|" .. vim.fn.sha256(preview)
-				groups[key] = groups[key] or {}
-				table.insert(groups[key], { name = name, path = full })
+				local size = stat.size or 0
+				by_size[size] = by_size[size] or {}
+				table.insert(by_size[size], { name = name, path = full })
 			end
 		end
 	end
 
+	-- 2) Only files sharing a size are duplicate candidates; full-hash just those.
+	local candidates = {}
+	for _, list in pairs(by_size) do
+		if #list > 1 then
+			for _, item in ipairs(list) do table.insert(candidates, item.path) end
+		end
+	end
+	if #candidates == 0 then
+		util.notify("No duplicates found")
+		return
+	end
+
+	local hashes = hashes_via_powershell(candidates)
+
+	-- 3) Group candidates by full-content hash. A real hash (not the old
+	--    head+tail heuristic, which could wrongly flag files that merely share
+	--    their first and last 2 KB) means everything grouped here is genuinely
+	--    byte-for-byte identical.
+	local by_hash = {}
+	for _, list in pairs(by_size) do
+		if #list > 1 then
+			for _, item in ipairs(list) do
+				local h = hashes[item.path] or hash_file_lua(item.path)
+				if h then
+					by_hash[h] = by_hash[h] or {}
+					table.insert(by_hash[h], item)
+				end
+			end
+		end
+	end
+
+	-- 4) Keep the first (alphabetical) of each identical set; move the rest.
 	local dup_dir = util.join(dir, "Duplicates")
 	local moved = 0
-	for _, list in pairs(groups) do
+	for _, list in pairs(by_hash) do
 		if #list > 1 then
 			table.sort(list, function(a, b) return a.name:lower() < b.name:lower() end)
 			for i = 2, #list do

@@ -194,7 +194,15 @@ function M.wipe_oil_dir(dir)
 			and not vim.bo[buf].modified
 			and #vim.fn.win_findbuf(buf) == 0
 		then
-			return (pcall(vim.api.nvim_buf_delete, buf, { force = false }))
+			-- Must be a full :bwipeout, not nvim_buf_delete (which is :bdelete and
+			-- leaves the buffer *valid* but unloaded). Oil reuses that husk by name
+			-- on the next `:Oil <dir>` and its load path short-circuits on the
+			-- leftover buffer-local filetype marker, so view.initialize() never runs
+			-- again -- and that is the only thing that repopulates the buffer's
+			-- render session. The next render then indexes a nil session and crashes
+			-- (oil/view.lua render_buffer). Wiping forces Oil to build a fresh buffer
+			-- (and session) from scratch.
+			return (pcall(vim.cmd, "silent! bwipeout " .. buf))
 		end
 	end
 	return false

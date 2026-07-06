@@ -318,12 +318,16 @@ end
 --- width-step wider than an even third, and the cursor lands there in insert
 --- mode so you can type straight away. The centre shows the PWD's
 --- documents/prompts/ folder in Oil when it exists (else the PWD itself), and
---- the right always shows the PWD in Oil.
+--- the right shows frontend/sdl/ when the project has that folder, otherwise
+--- the PWD in Oil.
 function M.ai_mode_tab()
 	local cwd = util.resolve_cwd(vim.api.nvim_get_current_buf())
 	local base = cwd or vim.fn.getcwd()
 	local prompts = util.join(base, "documents", "prompts")
 	local center_dir = util.is_dir(prompts) and prompts or base
+	local project = util.project_root(base) or base
+	local sdl = util.join(project, "frontend", "sdl")
+	local right_dir = util.is_dir(sdl) and sdl or base
 
 	vim.cmd("tabnew")
 	local mid = vim.api.nvim_get_current_win()
@@ -336,7 +340,7 @@ function M.ai_mode_tab()
 	vim.api.nvim_set_current_win(mid)
 	util.open_dir(center_dir)
 	vim.api.nvim_set_current_win(right)
-	util.open_dir(base)
+	util.open_dir(right_dir)
 
 	open_term(left, cwd)
 

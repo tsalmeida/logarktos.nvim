@@ -68,6 +68,7 @@ bufferfiles = {
 | `:LogarktosLarge` / `:LogarktosNewLarge` | wide editor flanked by narrow scratch buffers |
 | `:LogarktosFocus` | editor centred with empty side buffers |
 | `:LogarktosWork` / `:LogarktosHereWork` | editor plus two terminals (new tab / current tab) |
+| `:LogarktosAIMode` / `:AIMode` | terminal plus prompts/Oil columns; right Oil opens `frontend/sdl/` when the project has it |
 | `:LogarktosTriple` / `:LogarktosDual` | synchronized views of the same buffer |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
 | `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |

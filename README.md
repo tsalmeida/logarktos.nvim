@@ -110,9 +110,9 @@ folder so the file disappears from the listing.
 ### Bookmarks & recent files
 
 `:LogarktosBookmarks` opens an Oil-like list (folders first, then files, newest
-first). `<CR>` opens, `<C-v>`/`<C-x>` split, `dd` deletes, `q` closes. Add the
-current/Oil file or folder with `:LogarktosBookmarkAdd` /
-`:LogarktosBookmarkAddDir`.
+first). `<CR>` opens in Neovim, `<C-v>`/`<C-x>` split, `gx` opens with the
+operating system's default app, `dd` deletes, and `q` closes. Add the current/Oil
+file or folder with `:LogarktosBookmarkAdd` / `:LogarktosBookmarkAddDir`.
 
 ### Working-directory mode
 

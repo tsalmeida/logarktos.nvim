@@ -1,5 +1,6 @@
 -- logarktos/bookmarks.lua ── file/folder bookmarks with an Oil-like list buffer
 local config = require("logarktos.config")
+local util = require("logarktos.util")
 
 local M = {}
 
@@ -387,6 +388,22 @@ local function open_item_under_cursor(cmd)
 	end
 end
 
+local function open_item_external()
+	local buf = vim.api.nvim_get_current_buf()
+	local row = vim.api.nvim_win_get_cursor(0)[1]
+	local item = (vim.b[buf].bookmark_meta or {})[row]
+	if not item or not item.path then return end
+	local path = item.path
+	if not exists(path) then
+		vim.notify("Path not found: " .. path, vim.log.levels.WARN, { title = "Bookmarks" })
+		return
+	end
+	local ok, err = util.open_external(path)
+	if not ok then
+		vim.notify("Could not open: " .. tostring(err), vim.log.levels.ERROR, { title = "Bookmarks" })
+	end
+end
+
 local function prepare_buffer(buf)
 	vim.bo[buf].buftype = "nofile"
 	vim.bo[buf].bufhidden = "wipe"
@@ -405,6 +422,7 @@ local function configure_buffer(buf)
 	vim.keymap.set("n", "<CR>", function() open_item_under_cursor("edit") end, opts)
 	vim.keymap.set("n", "<C-v>", function() open_item_under_cursor("vsplit") end, opts)
 	vim.keymap.set("n", "<C-x>", function() open_item_under_cursor("split") end, opts)
+	vim.keymap.set("n", "gx", open_item_external, opts)
 	vim.keymap.set("n", "q", function() vim.cmd("close") end, opts)
 	vim.keymap.set("n", "dd", function() M.bookmark_del() end, opts)
 

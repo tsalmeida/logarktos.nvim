@@ -27,6 +27,26 @@ function M.exists(path)
 	return path and path ~= "" and M.uv.fs_stat(path) ~= nil
 end
 
+--- Open a path or URL with the operating system's default handler.
+function M.open_external(target)
+	if not target or target == "" then return false, "empty target" end
+
+	if vim.ui and vim.ui.open then
+		local ok, job, err = pcall(vim.ui.open, target)
+		if ok and job then return true end
+		if ok and not err then err = "no system opener found" end
+		if not ok then err = job end
+		return false, tostring(err)
+	end
+
+	if M.is_windows and vim.system then
+		local ok = pcall(vim.system, { "cmd.exe", "/c", "start", "", target }, { detach = true, text = true })
+		if ok then return true end
+	end
+
+	return false, "no system opener found"
+end
+
 function M.is_dir(path)
 	local st = path and M.uv.fs_stat(path)
 	return st ~= nil and st.type == "directory"

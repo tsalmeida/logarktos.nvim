@@ -6,20 +6,34 @@ local M = {}
 
 local highlight_ns = vim.api.nvim_create_namespace("logarktos_bookmarklist")
 local highlight_group = "LogarktosBookmarkFilename"
-local highlight_defined = false
 
+-- Tint the filename portion of each entry with the colourscheme's warning
+-- background where one exists (a deliberate accent in the sepia schemes). When
+-- the active scheme sets no such colour, link to Normal so the name just uses
+-- the regular text colour instead of an invented off-palette green.
+--
+-- Re-derived on every render (and on ColorScheme, below) rather than latched
+-- once: a value captured before the scheme finished loading, or a group wiped
+-- by a later `:colorscheme` (implicit `hi clear`), would otherwise leave the
+-- startup layout looking different from a hand-run :TriplicateLarge.
 local function ensure_highlight()
-	if highlight_defined then return end
 	local attrs
 	local ok, warning = pcall(vim.api.nvim_get_hl, 0, { name = "WarningMsg", link = false })
-	if ok then
-		local green = warning and warning.bg or nil
-		if type(green) == "number" then green = string.format("#%06x", green) end
-		if green and green ~= "" then attrs = { fg = green, bold = warning and warning.bold or nil } end
+	if ok and warning and warning.bg then
+		local accent = warning.bg
+		if type(accent) == "number" then accent = string.format("#%06x", accent) end
+		if accent ~= "" then attrs = { fg = accent, bold = warning.bold or nil } end
 	end
-	if not attrs then attrs = { fg = "#4c6b3c", bold = true } end
-	if pcall(vim.api.nvim_set_hl, 0, highlight_group, attrs) then highlight_defined = true end
+	pcall(vim.api.nvim_set_hl, 0, highlight_group, attrs or { link = "Normal" })
 end
+
+-- Keep the group alive across colourscheme changes (each `:colorscheme` clears
+-- all highlights). Existing extmarks reference the group by name, so simply
+-- redefining it re-tints them without a re-render.
+vim.api.nvim_create_autocmd("ColorScheme", {
+	group = vim.api.nvim_create_augroup("LogarktosBookmarkHighlight", { clear = true }),
+	callback = ensure_highlight,
+})
 
 local function store_path()
 	local cfg = config.options.bookmarks and config.options.bookmarks.store

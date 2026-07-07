@@ -88,23 +88,25 @@ local highlight_ns = vim.api.nvim_create_namespace("logarktos_recentfiles")
 local highlight_group = "LogarktosRecentFilename"
 
 -- Tint the filename portion of each entry with the colourscheme's warning
--- background where one exists (a deliberate accent in the sepia schemes). When
--- the active scheme sets no such colour, link to Normal so the name just uses
--- the regular text colour instead of an invented off-palette green.
+-- background where one exists (a deliberate accent in the sepia schemes), as a
+-- foreground only so the entry's background stays unassigned. When the active
+-- scheme sets no such colour, leave the group empty so the name renders exactly
+-- like the surrounding text — no invented off-palette green, and crucially no
+-- hard-coded background painted over a transparent/textured window.
 --
 -- Re-derived on every render (and on ColorScheme, below) rather than latched
 -- once: a value captured before the scheme finished loading, or a group wiped
 -- by a later `:colorscheme` (implicit `hi clear`), would otherwise leave the
 -- startup layout looking different from a hand-run :TriplicateLarge.
 local function ensure_highlight()
-	local attrs
+	local attrs = {}
 	local ok, warning = pcall(vim.api.nvim_get_hl, 0, { name = "WarningMsg", link = false })
 	if ok and warning and warning.bg then
 		local accent = warning.bg
 		if type(accent) == "number" then accent = string.format("#%06x", accent) end
 		if accent ~= "" then attrs = { fg = accent, bold = warning.bold or nil } end
 	end
-	pcall(vim.api.nvim_set_hl, 0, highlight_group, attrs or { link = "Normal" })
+	pcall(vim.api.nvim_set_hl, 0, highlight_group, attrs)
 end
 
 -- Keep the group alive across colourscheme changes (each `:colorscheme` clears

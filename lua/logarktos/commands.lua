@@ -53,7 +53,7 @@ local function specs()
 
 		-- markdown + organize
 		{ "NewMarkdown", "NewMarkdown", function() markdown().new_markdown() end, { desc = "New timestamped Markdown note" } },
-		{ "MarkdownArchive", "MarkdownArchive", function() markdown().markdown_archive() end, { desc = "Move current file to ./archive" } },
+		{ "MarkdownArchive", "MarkdownArchive", function(a) markdown().markdown_archive(a) end, { desc = "Move current/selected Markdown file(s) to ./archive", range = true } },
 		{ "Organize", "Organize", function() organize().organize() end, { desc = "Organize directory into dated buckets" } },
 		{ "OrganizeImages", "OrganizeImages", function() organize().organize_images() end, { desc = "Sort images by orientation" } },
 		{ "Extract", "Extract", function() organize().extract_archives() end, { desc = "Extract archives in the Oil directory" } },

@@ -5,6 +5,102 @@ local uv = util.uv
 
 local M = {}
 
+local function is_markdown_name(name)
+	return type(name) == "string" and name:lower():match("%.md$") ~= nil
+end
+
+local function oil_line_range(opts)
+	opts = opts or {}
+	if opts.line1 and opts.line2 then
+		local line1, line2 = tonumber(opts.line1), tonumber(opts.line2)
+		if line1 and line2 and line1 > 0 and line2 > 0 and line1 ~= line2 then
+			if line1 > line2 then line1, line2 = line2, line1 end
+			return line1, line2
+		end
+	end
+
+	local mode = vim.api.nvim_get_mode().mode
+	if mode == "v" or mode == "V" then
+		local line1, line2 = vim.fn.line("v"), vim.fn.line(".")
+		if line1 > line2 then line1, line2 = line2, line1 end
+		return line1, line2
+	end
+
+	local line = vim.api.nvim_win_get_cursor(0)[1]
+	return line, line
+end
+
+local function move_to_archive(path, archive_dir)
+	local name = vim.fn.fnamemodify(path, ":t")
+	local dest = util.unique_path(util.join(archive_dir, name))
+	local ok, err = uv.fs_rename(path, dest)
+	if not ok then ok, err = os.rename(path, dest) end
+	return ok ~= nil and ok ~= false, dest, err
+end
+
+local function archive_oil_markdown(opts)
+	local dir = util.oil_dir(0)
+	if not dir or dir == "" then
+		util.notify("Oil directory is unknown.", vim.log.levels.WARN, "MarkdownArchive")
+		return
+	end
+
+	if (util.basename(dir) or ""):lower() == "archive" then
+		util.notify("Already in an archive/ folder.", vim.log.levels.INFO, "MarkdownArchive")
+		return
+	end
+
+	local oil = util.oil()
+	if not oil or not oil.get_entry_on_line then
+		util.notify("Oil entry API is unavailable.", vim.log.levels.ERROR, "MarkdownArchive")
+		return
+	end
+
+	local line1, line2 = oil_line_range(opts)
+	local files, seen = {}, {}
+	for lnum = line1, line2 do
+		local ok_entry, entry = pcall(oil.get_entry_on_line, 0, lnum)
+		if not ok_entry then entry = nil end
+		if entry and entry.type == "file" and is_markdown_name(entry.name) then
+			local path = util.join(dir, entry.name)
+			local norm = util.normalize(path)
+			if not seen[norm] and uv.fs_stat(path) then
+				seen[norm] = true
+				table.insert(files, path)
+			end
+		end
+	end
+
+	if #files == 0 then
+		util.notify("No Markdown files selected in Oil.", vim.log.levels.WARN, "MarkdownArchive")
+		return
+	end
+
+	local archive_dir = util.join(dir, "archive")
+	if not util.ensure_dir(archive_dir) then return end
+
+	local archived, failed = {}, {}
+	for _, path in ipairs(files) do
+		local ok, dest, err = move_to_archive(path, archive_dir)
+		if ok then
+			table.insert(archived, dest)
+		else
+			table.insert(failed, vim.fn.fnamemodify(path, ":t") .. ": " .. tostring(err or "unknown error"))
+		end
+	end
+
+	util.refresh_oil()
+	if #failed > 0 then
+		util.notify(
+			("Archived %d Markdown file(s); %d failed:\n%s"):format(#archived, #failed, table.concat(failed, "\n")),
+			vim.log.levels.WARN,
+			"MarkdownArchive"
+		)
+	else
+		util.notify(("Archived %d Markdown file(s) to archive/"):format(#archived), vim.log.levels.INFO, "MarkdownArchive")
+	end
+end
+
 --- Resolve the directory a new note should be created in.
 local function target_dir(opts)
 	opts = opts or {}
@@ -133,10 +229,11 @@ end
 
 -- ── Markdown Archive ─────────────────────────────────────────────────────────
 -- Move the current file unchanged into an `archive/` subfolder of its own dir.
-function M.markdown_archive()
+function M.markdown_archive(opts)
+	opts = opts or {}
 	local buf = vim.api.nvim_get_current_buf()
 	if vim.bo[buf].filetype == "oil" then
-		util.notify("Open the file first, then archive it.", vim.log.levels.WARN, "MarkdownArchive")
+		archive_oil_markdown(opts)
 		return
 	end
 
@@ -161,9 +258,7 @@ function M.markdown_archive()
 	local archive_dir = util.join(dir, "archive")
 	if not util.ensure_dir(archive_dir) then return end
 
-	local dest = util.unique_path(util.join(archive_dir, name))
-	local ok, err = uv.fs_rename(current_path, dest)
-	if not ok then ok, err = os.rename(current_path, dest) end
+	local ok, dest, err = move_to_archive(current_path, archive_dir)
 	if not ok then
 		util.notify("Could not archive file: " .. tostring(err or "unknown error"), vim.log.levels.ERROR, "MarkdownArchive")
 		return

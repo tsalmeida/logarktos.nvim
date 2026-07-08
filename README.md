@@ -93,7 +93,9 @@ the cursor lands there in insert mode with the line centred. Without a template
 the behaviour is unchanged — in Oil you simply land on the new file.
 `:LogarktosMarkdownArchive` tucks the current file, unchanged, into an
 `archive/` subfolder, then drops you into a refreshed Oil view of the original
-folder so the file disappears from the listing.
+folder so the file disappears from the listing. From an Oil buffer it can also
+archive the current entry or a visual/ranged selection of Markdown files into
+that Oil directory's `archive/` folder.
 
 ### Organize
 

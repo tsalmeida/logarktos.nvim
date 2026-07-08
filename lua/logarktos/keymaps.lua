@@ -71,7 +71,14 @@ local function actions()
 
 		-- markdown + organize
 		new_markdown        = { "n", function() MD().new_markdown() end, "New Markdown note" },
-		markdown_archive    = { "n", function() MD().markdown_archive() end, "Archive current file" },
+		markdown_archive    = { { "n", "x" }, function()
+			local mode = vim.api.nvim_get_mode().mode
+			if mode == "v" or mode == "V" then
+				MD().markdown_archive({ line1 = vim.fn.line("v"), line2 = vim.fn.line(".") })
+			else
+				MD().markdown_archive()
+			end
+		end, "Archive current/selected Markdown file(s)" },
 		organize            = { "n", function() ORG().organize() end, "Organize directory" },
 		organize_images     = { "n", function() ORG().organize_images() end, "Sort images" },
 		separate_duplicates = { "n", function() ORG().separate_duplicates() end, "Separate duplicates" },

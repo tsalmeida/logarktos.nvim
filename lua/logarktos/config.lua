@@ -35,7 +35,6 @@ M.default_keymaps = {
 	split_close         = "<leader>wq",
 	-- bufferfiles
 	bufferfiles_open    = "<leader>bu",
-	bufferfiles_delete  = "<leader>db",
 	-- bookmarks
 	bookmark_add_file   = "<leader>bf",
 	bookmark_add_dir    = "<leader>bF",

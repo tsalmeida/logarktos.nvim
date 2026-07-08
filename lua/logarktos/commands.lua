@@ -43,7 +43,6 @@ local function specs()
 
 		-- bufferfiles
 		{ "BufferFiles", "BufferFiles", function() bufferfiles().open_root() end, { desc = "Open the bufferfiles root" } },
-		{ "DeleteBufferfiles", "DeleteBufferfiles", function() bufferfiles().delete_all() end, { desc = "Delete temporary bufferfiles" } },
 
 		-- bookmarks
 		{ "Bookmarks", nil, function() bookmarks().bookmark_list() end, { desc = "List bookmarks" } },

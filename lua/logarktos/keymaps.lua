@@ -61,7 +61,6 @@ local function actions()
 
 		-- bufferfiles
 		bufferfiles_open    = { "n", function() B().open_root() end, "Open bufferfiles" },
-		bufferfiles_delete  = { "n", function() B().delete_all() end, "Delete bufferfiles" },
 
 		-- bookmarks
 		bookmark_add_file   = { { "n", "v" }, function() BM().bookmark_add() end, "Bookmark file" },

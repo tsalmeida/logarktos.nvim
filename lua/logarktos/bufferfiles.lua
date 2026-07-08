@@ -270,20 +270,6 @@ local function maintain_now()
 end
 
 -- ── public API ───────────────────────────────────────────────────────────────
-function M.delete_all()
-	local files = list_root_files()
-	if #files == 0 then
-		util.notify("No bufferfiles to delete", vim.log.levels.INFO, "Bufferfiles")
-		return
-	end
-	local removed = 0
-	for _, p in ipairs(files) do
-		if vim.fn.delete(p) == 0 then removed = removed + 1 end
-	end
-	util.notify(("Deleted %d bufferfile%s"):format(removed, removed == 1 and "" or "s"),
-		vim.log.levels.INFO, "Bufferfiles")
-end
-
 function M.clean_empty()
 	delete_empties(list_root_files())
 end

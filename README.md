@@ -49,7 +49,9 @@ require("logarktos").setup({
 Start typing in any empty buffer. The moment it has text, logarktos gives it a
 name under a private *bufferfiles* root and autosaves it. The root keeps the
 most-recent `keep` files (default 20); older ones move to `archive/`, and files
-you rename move to `named/`. Open the root with `:LogarktosBufferFiles`.
+you rename move to `named/`. A freshly-created bufferfile is reloaded after its
+first autosave, so Neovim treats it as a Markdown file right away. Open the root
+with `:LogarktosBufferFiles`.
 
 ```lua
 bufferfiles = {

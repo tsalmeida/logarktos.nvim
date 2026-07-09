@@ -161,6 +161,23 @@ local function is_bufferfile(buf)
 	return is_in_root_dir(name)
 end
 
+local function reload_after_initial_write(buf, path)
+	if vim.b[buf].bufferfile_reload_scheduled then return end
+	vim.b[buf].bufferfile_reload_scheduled = true
+
+	vim.schedule(function()
+		if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_buf_is_loaded(buf) then return end
+		if vim.api.nvim_buf_get_name(buf) ~= path then return end
+		if vim.api.nvim_buf_get_option(buf, "modified") then
+			vim.b[buf].bufferfile_reload_scheduled = nil
+			vim.b[buf].bufferfile_reload_after_write = path
+			return
+		end
+
+		pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent keepalt edit!") end)
+	end)
+end
+
 local function autosave_bufferfile(buf)
 	if not is_bufferfile(buf) then return end
 	if not vim.api.nvim_buf_is_loaded(buf) then return end
@@ -175,7 +192,12 @@ local function autosave_bufferfile(buf)
 		return
 	end
 
-	pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent keepalt write") end)
+	local ok = pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent keepalt write") end)
+	if ok and vim.b[buf].bufferfile_reload_after_write then
+		local path = vim.b[buf].bufferfile_reload_after_write
+		vim.b[buf].bufferfile_reload_after_write = nil
+		reload_after_initial_write(buf, path)
+	end
 end
 
 local function next_path()
@@ -203,6 +225,7 @@ local function assign_name(buf)
 	vim.api.nvim_buf_set_name(buf, path)
 	vim.b[buf].bufferfile_assigned = true
 	vim.b[buf].bufferfile_path = path
+	vim.b[buf].bufferfile_reload_after_write = path
 	ensure_confirm_disabled(buf)
 end
 

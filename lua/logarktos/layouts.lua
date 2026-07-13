@@ -107,8 +107,15 @@ local function pick_inactive_bg()
 	local normal_bg = get_hl_bg("Normal")
 
 	-- Scheme-published hint wins, as long as it isn't washed out against Normal.
+	-- "Washed out" means TOO LITTLE contrast (an invisible tint) -- so only a
+	-- lower bound applies here. The 1.8 upper bound in gently_contrasts is for
+	-- the auto-DERIVED dim below (which must stay subtle); an explicit scheme
+	-- hint may legitimately be a strong tint (e.g. chromaki's "shaded blue"
+	-- inactive, which is deliberately high-contrast against a light page). Using
+	-- the full gently_contrasts range here wrongly rejected such hints and fell
+	-- through to a derived near-Normal tint -- so shaded blue rendered as white.
 	local hint = as_hex(vim.g[HINT_KEY])
-	if hint and (not normal_bg or gently_contrasts(hint, normal_bg)) then
+	if hint and (not normal_bg or contrast_ratio(hint, normal_bg) >= 1.15) then
 		return hint
 	end
 

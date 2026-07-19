@@ -221,8 +221,6 @@ function M.serialize(data)
 	local body = serialize_value(data or {}, 0)
 	return table.concat({
 		"-- logarktos.lua — project / user settings for logarktos.nvim",
-		"-- Edited by the plugin when layouts are first opened, or when bookmarks change.",
-		"-- Keep secrets (API keys) out of this file; use a gitignored .env instead.",
 		"",
 		"return " .. body,
 		"",

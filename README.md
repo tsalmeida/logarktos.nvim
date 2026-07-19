@@ -101,22 +101,20 @@ Two scopes share the same filename and Lua table format:
    user file when you run those layouts from the Neovim config folder.
 
 ```lua
--- What the plugin seeds on first use (plain defaults):
+-- What the plugin seeds on first use (plain defaults; cmd ready to fill):
 return {
   aimode = {
-    left = {},                 -- interactive terminal, no command
-    center = { path = "." },   -- Oil at the layout folder
+    left = { path = ".", cmd = "" },  -- put e.g. "grok --yolo" in cmd
+    center = { path = "." },          -- Oil at the layout folder
     right = { path = "." },
   },
   work = {
-    right = { {}, {} },        -- two plain terminals
+    right = {
+      { path = ".", cmd = "" },       -- top terminal
+      { path = ".", cmd = "" },       -- bottom terminal
+    },
   },
 }
-
--- Optional hand-edits you might add later for a specific project:
---   aimode.left = { cmd = "grok --yolo" }
---   aimode.center = { path = "documents/prompts" }
---   aimode.right = { path = "frontend/sdl" }
 ```
 
 Legacy `logarktos.env` (`left:…` lines) is still read and converted when no

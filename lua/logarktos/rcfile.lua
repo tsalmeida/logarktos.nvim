@@ -12,20 +12,16 @@
 --     bufferfiles = { dir = "C:/…/bufferfiles/" },
 --     ai = { model = "gpt-5-mini", max_input_chars = 1000, default_instruction = "…" },
 --     bookmarks = { "C:/path/to/file" },
---     -- optional layout overrides for this folder (plain terminal + Oil by default):
---     aimode = { left = {}, center = { path = "." }, right = { path = "." } },
---     work = { right = { {}, {} } },
---   }
---
--- Example (any project folder — layout only; first-run seed is the plain version):
---   return {
 --     aimode = {
---       left = {},                      -- interactive terminal, no auto-start command
---       center = { path = "." },        -- Oil at the folder (edit to e.g. documents/prompts)
+--       left = { path = ".", cmd = "" },  -- type a CLI into cmd when you want one
+--       center = { path = "." },
 --       right = { path = "." },
 --     },
 --     work = {
---       right = { {}, {} },             -- two plain terminals
+--       right = {
+--         { path = ".", cmd = "" },
+--         { path = ".", cmd = "" },
+--       },
 --     },
 --   }
 
@@ -413,12 +409,13 @@ local function pane_spec(pane, base)
 end
 
 --- Defaults AIMode would use with no config (relative form for storage).
---- Plain only: interactive terminal (no auto-start command) + Oil on the
+--- Plain only: interactive terminal (empty cmd ready to fill) + Oil on the
 --- layout folder for both columns. No frontend/sdl or prompts heuristics —
---- add those paths by hand in logarktos.lua when you want them.
+--- set paths / cmd by hand in logarktos.lua when you want them.
 function M.default_aimode(_base)
 	return {
-		left = {}, -- terminal at base, no command
+		-- Terminal: keep `cmd = ""` so a CLI is one edit away (e.g. "grok --yolo").
+		left = { path = ".", cmd = "" },
 		center = { path = "." },
 		right = { path = "." },
 	}
@@ -427,9 +424,10 @@ end
 function M.default_work(_base)
 	return {
 		-- left omitted → keep current buffer
+		-- Terminals: empty cmd strings are ready to fill; blank → plain shell.
 		right = {
-			{}, -- top terminal, plain shell
-			{}, -- bottom terminal, plain shell
+			{ path = ".", cmd = "" }, -- top
+			{ path = ".", cmd = "" }, -- bottom
 		},
 	}
 end

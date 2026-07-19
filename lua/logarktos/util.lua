@@ -228,13 +228,39 @@ function M.wipe_oil_dir(dir)
 	return false
 end
 
---- Resolve a working directory from a buffer: Oil dir → file's dir → cwd.
+--- Path under the cursor in a logarktos bookmark-list buffer, or nil.
+--- Directory bookmarks return the folder; file bookmarks return the parent dir.
+local function bookmark_list_dir(buf)
+	if vim.bo[buf].filetype ~= "logarktos_bookmarklist" then return nil end
+	local row
+	local wins = vim.fn.win_findbuf(buf)
+	if #wins > 0 then
+		row = vim.api.nvim_win_get_cursor(wins[1])[1]
+	elseif vim.api.nvim_get_current_buf() == buf then
+		row = vim.api.nvim_win_get_cursor(0)[1]
+	else
+		return nil
+	end
+	local item = (vim.b[buf].bookmark_meta or {})[row]
+	if type(item) ~= "table" or not item.path or item.path == "" then return nil end
+	local path = item.path
+	if M.is_dir(path) then return M.normalize(path) end
+	return vim.fn.fnamemodify(path, ":p:h")
+end
+
+--- Resolve a working directory from a buffer:
+--- Oil dir → bookmark under cursor → file's dir → cwd.
+--- Layouts (AIMode, Work, Triple, …) use this so selecting a folder in the
+--- space+bl bookmark list and pressing space+am opens that location.
 function M.resolve_cwd(buf)
 	buf = buf or vim.api.nvim_get_current_buf()
-	if vim.bo[buf].filetype == "oil" then
+	local ft = vim.bo[buf].filetype
+	if ft == "oil" then
 		local dir = M.oil_dir(buf)
 		if dir then return dir end
 	end
+	local from_bookmark = bookmark_list_dir(buf)
+	if from_bookmark then return from_bookmark end
 	local path = vim.api.nvim_buf_get_name(buf)
 	if path ~= "" then return vim.fn.fnamemodify(path, ":p:h") end
 	return vim.fn.getcwd()

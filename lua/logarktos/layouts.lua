@@ -208,6 +208,11 @@ end
 --- Open a terminal in `win`. When `cmd` is set, run that shell command (AI CLI
 --- etc.); otherwise open a plain interactive shell. Marks the buffer so AI-app
 --- tab renaming can watch it when `watch_ai` is true.
+---
+--- When `cmd` is set, `b:logarktos_term_cmd` is written *before* termopen so
+--- config-side TermOpen hooks (e.g. feeding Set-ExecutionPolicy into interactive
+--- PowerShell) can skip this buffer — chansend would otherwise land in the AI
+--- CLI's stdin and garble the TUI.
 --- @return integer terminal buffer
 local function open_term(win, cwd, cmd, opts)
 	opts = opts or {}
@@ -217,13 +222,16 @@ local function open_term(win, cwd, cmd, opts)
 	vim.api.nvim_win_set_buf(win, t_buf)
 	local term_opts = { cwd = cwd }
 	if cmd and cmd ~= "" then
-		-- String form goes through 'shell'/'shellcmdflag' so PATH and flags work
-		-- the same as typing the command by hand.
-		vim.fn.termopen(cmd, term_opts)
+		-- Mark before termopen so TermOpen autocmds see it (they fire mid-call).
+		vim.b[t_buf].logarktos_term_cmd = cmd
 		local app = opts.app or envfile.ai_app_name(cmd)
 		if app then
 			vim.b[t_buf].logarktos_ai_app = app
 		end
+		-- String form goes through 'shell'/'shellcmdflag' so PATH and flags work
+		-- the same as typing the command by hand. shellcmdflag already carries
+		-- -ExecutionPolicy on Windows; do not also feed policy text via chansend.
+		vim.fn.termopen(cmd, term_opts)
 	else
 		vim.fn.termopen(vim.o.shell, term_opts)
 	end

@@ -179,8 +179,8 @@ function M.focus_mode_tab()
 	if center_dir then
 		util.open_dir(center_dir)
 	else
-		vim.api.nvim_win_set_buf(middle_win, source_buf)
-		vim.fn.winrestview(view)
+		-- List panels (bookmarks) → open selected path, not the list buffer itself.
+		util.open_focus_or_buf(source_buf, view)
 	end
 	vim.cmd("leftabove vnew")
 	if left_dir then
@@ -200,7 +200,9 @@ function M.focus_mode_tab()
 		vim.bo[r_buf].swapfile = false
 	end
 	vim.api.nvim_set_current_win(middle_win)
-	if not center_dir then vim.fn.winrestview(view) end
+	if not center_dir and not util.is_list_panel(source_buf) then
+		vim.fn.winrestview(view)
+	end
 	vim.cmd("wincmd =")
 
 	name_layout_tab(vim.api.nvim_win_get_buf(middle_win), { layout = "focus" })
@@ -371,8 +373,12 @@ local function build_work_layout(opts)
 
 	local left_win = vim.api.nvim_get_current_win()
 	if opts.new_tab then
-		vim.api.nvim_win_set_buf(left_win, buf)
-		vim.fn.winrestview(view)
+		-- Default: keep the source buffer. From a bookmark/recent list, open the
+		-- selected path (Oil for folders, :edit for files) instead of cloning the list.
+		util.open_focus_or_buf(buf, view)
+	elseif util.is_list_panel(buf) then
+		-- HereWork: still replace a list panel with the selection in-place.
+		util.open_focus_or_buf(buf, view)
 	end
 	if cwd then pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd)) end
 
@@ -408,7 +414,9 @@ end
 
 function M.work_mode_tab()
 	local info = build_work_layout({ new_tab = true })
-	name_layout_tab(info.buf, { layout = "work", dir = info.cwd })
+	-- Name from the left pane after open (bookmark list → Oil/file, not the list).
+	local left_buf = vim.api.nvim_get_current_buf()
+	name_layout_tab(left_buf, { layout = "work", dir = info.cwd })
 	-- Prefer the top terminal's AI app for the tab label when auto-started.
 	local app = info.top_app or info.bot_app
 	if app then tabs.apply_ai_app(app) end
@@ -426,16 +434,14 @@ function M.here_work_mode()
 	if app then tabs.apply_ai_app(app) end
 end
 
---- Open `dir` in Oil in the current window, or keep `buf` when dir is nil.
+--- Open `dir` in Oil in the current window; else the focus path of `buf`
+--- (bookmark/recent selection), or keep `buf` when it is real content.
 local function open_pane_dir_or_buf(dir, buf, view)
 	if dir then
 		util.open_dir(dir)
 		return
 	end
-	if buf and vim.api.nvim_buf_is_valid(buf) then
-		vim.api.nvim_win_set_buf(0, buf)
-		if view then vim.fn.winrestview(view) end
-	end
+	util.open_focus_or_buf(buf, view)
 end
 
 function M.triple_mode_tab()
@@ -502,8 +508,7 @@ function M.large_mode_tab()
 	if center_dir then
 		util.open_dir(center_dir)
 	else
-		vim.api.nvim_win_set_buf(mid, buf)
-		vim.fn.winrestview(view)
+		util.open_focus_or_buf(buf, view)
 	end
 	vim.cmd("leftabove vnew")
 	local left = vim.api.nvim_get_current_win()

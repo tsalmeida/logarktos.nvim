@@ -228,30 +228,85 @@ function M.wipe_oil_dir(dir)
 	return false
 end
 
---- Path under the cursor in a logarktos bookmark-list buffer, or nil.
---- Directory bookmarks return the folder; file bookmarks return the parent dir.
-local function bookmark_list_dir(buf)
-	if vim.bo[buf].filetype ~= "logarktos_bookmarklist" then return nil end
-	local row
+--- Cursor row for `buf` when it is shown in a window (else nil).
+local function cursor_row_for_buf(buf)
 	local wins = vim.fn.win_findbuf(buf)
 	if #wins > 0 then
-		row = vim.api.nvim_win_get_cursor(wins[1])[1]
-	elseif vim.api.nvim_get_current_buf() == buf then
-		row = vim.api.nvim_win_get_cursor(0)[1]
-	else
+		return vim.api.nvim_win_get_cursor(wins[1])[1]
+	end
+	if vim.api.nvim_get_current_buf() == buf then
+		return vim.api.nvim_win_get_cursor(0)[1]
+	end
+	return nil
+end
+
+--- True for list panels that are not themselves editable content (bookmark /
+--- recent-file lists). Layouts must open the *selected* path instead of
+--- cloning these buffers into Triple/Dual/Work/etc.
+function M.is_list_panel(buf)
+	buf = buf or vim.api.nvim_get_current_buf()
+	if not buf or not vim.api.nvim_buf_is_valid(buf) then return false end
+	local ft = vim.bo[buf].filetype
+	return ft == "logarktos_bookmarklist" or ft == "logarktos_recentfiles"
+end
+
+--- Exact path under the cursor / focus of `buf`, or nil.
+--- Bookmark list → selected entry; recent-files → selected entry; Oil → dir;
+--- normal file buffer → its path. List headers / empty rows return nil.
+function M.resolve_focus_path(buf)
+	buf = buf or vim.api.nvim_get_current_buf()
+	if not buf or not vim.api.nvim_buf_is_valid(buf) then return nil end
+	local ft = vim.bo[buf].filetype
+
+	if ft == "logarktos_bookmarklist" then
+		local row = cursor_row_for_buf(buf)
+		if not row then return nil end
+		local item = (vim.b[buf].bookmark_meta or {})[row]
+		if type(item) == "table" and item.path and item.path ~= "" then
+			return M.normalize(item.path)
+		end
 		return nil
 	end
-	local item = (vim.b[buf].bookmark_meta or {})[row]
-	if type(item) ~= "table" or not item.path or item.path == "" then return nil end
-	local path = item.path
-	if M.is_dir(path) then return M.normalize(path) end
-	return vim.fn.fnamemodify(path, ":p:h")
+
+	if ft == "logarktos_recentfiles" then
+		local row = cursor_row_for_buf(buf)
+		if not row then return nil end
+		local offset = vim.b[buf].recentfiles_header_lines or 0
+		local entry = (vim.b[buf].recentfiles_items or {})[row - offset]
+		if type(entry) == "table" and entry.path and entry.path ~= "" then
+			return M.normalize(entry.path)
+		end
+		return nil
+	end
+
+	if ft == "oil" then
+		return M.oil_dir(buf)
+	end
+
+	local path = vim.api.nvim_buf_get_name(buf)
+	if path ~= "" and (vim.bo[buf].buftype == "" or vim.bo[buf].buftype == "acwrite") then
+		return path
+	end
+	return nil
+end
+
+--- Open a filesystem path: directories in Oil (or :edit), files with :edit.
+function M.open_path(path)
+	if not path or path == "" then return false end
+	if M.is_dir(path) then
+		M.open_dir(path)
+		return true
+	end
+	if M.exists(path) then
+		vim.cmd.edit(vim.fn.fnameescape(path))
+		return true
+	end
+	return false
 end
 
 --- Resolve a working directory from a buffer:
---- Oil dir → bookmark under cursor → file's dir → cwd.
---- Layouts (AIMode, Work, Triple, …) use this so selecting a folder in the
---- space+bl bookmark list and pressing space+am opens that location.
+--- Oil dir → focus path (bookmark/recent/file) as dir → cwd.
+--- Layouts use this for terminals, lcd, and logarktos.lua base folder.
 function M.resolve_cwd(buf)
 	buf = buf or vim.api.nvim_get_current_buf()
 	local ft = vim.bo[buf].filetype
@@ -259,11 +314,30 @@ function M.resolve_cwd(buf)
 		local dir = M.oil_dir(buf)
 		if dir then return dir end
 	end
-	local from_bookmark = bookmark_list_dir(buf)
-	if from_bookmark then return from_bookmark end
+	local focus = M.resolve_focus_path(buf)
+	if focus then
+		if M.is_dir(focus) then return focus end
+		return vim.fn.fnamemodify(focus, ":p:h")
+	end
 	local path = vim.api.nvim_buf_get_name(buf)
 	if path ~= "" then return vim.fn.fnamemodify(path, ":p:h") end
 	return vim.fn.getcwd()
+end
+
+--- Open the layout "content" for `buf`: list panels → selected path; else keep buf.
+--- Returns true when something was opened into the current window.
+function M.open_focus_or_buf(buf, view)
+	if buf and vim.api.nvim_buf_is_valid(buf) and M.is_list_panel(buf) then
+		local path = M.resolve_focus_path(buf)
+		if path and M.open_path(path) then return true end
+		return false
+	end
+	if buf and vim.api.nvim_buf_is_valid(buf) then
+		vim.api.nvim_win_set_buf(0, buf)
+		if view then vim.fn.winrestview(view) end
+		return true
+	end
+	return false
 end
 
 return M

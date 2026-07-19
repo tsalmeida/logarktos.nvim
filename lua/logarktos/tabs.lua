@@ -74,6 +74,23 @@ function M.set(tab, name, opts)
 	local priority = opts.priority or ((opts.lock == false) and P.layout or P.manual)
 	vim.api.nvim_tabpage_set_var(tab, "logarktos_name", name)
 	vim.api.nvim_tabpage_set_var(tab, "logarktos_name_priority", priority)
+	-- Keep an un-prefixed base whenever the caller is not itself applying an AI
+	-- prefix (apply_ai_app sets base_name explicitly first). Manual renames also
+	-- refresh the base so a later AI app switch rebuilds cleanly.
+	if not opts.keep_base then
+		local envfile = require("logarktos.envfile")
+		local app, rest = name:match("^([%w]+)%-(.+)$")
+		if app and rest and envfile.AI_APPS[app:lower()] then
+			-- Name already looks like codex-Title; only adopt as base if we have none.
+			local ok_b, existing = pcall(vim.api.nvim_tabpage_get_var, tab, "logarktos_base_name")
+			if not (ok_b and type(existing) == "string" and existing ~= "") then
+				vim.api.nvim_tabpage_set_var(tab, "logarktos_base_name", rest)
+			end
+		else
+			vim.api.nvim_tabpage_set_var(tab, "logarktos_base_name", name)
+			pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_ai_app")
+		end
+	end
 	if priority >= MEANINGFUL then
 		vim.api.nvim_tabpage_set_var(tab, "logarktos_name_locked", true)
 	else
@@ -87,7 +104,67 @@ function M.clear(tab)
 	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_name")
 	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_name_priority")
 	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_name_locked")
+	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_base_name")
+	pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_ai_app")
 	redraw()
+end
+
+--- Remember the un-prefixed title used for AI app labels (`codex-<base>`).
+function M.set_base_name(tab, name)
+	tab = get_tab(tab)
+	if not name or name == "" then
+		pcall(vim.api.nvim_tabpage_del_var, tab, "logarktos_base_name")
+		return
+	end
+	vim.api.nvim_tabpage_set_var(tab, "logarktos_base_name", name)
+end
+
+function M.get_base_name(tab)
+	tab = get_tab(tab)
+	local ok, name = pcall(vim.api.nvim_tabpage_get_var, tab, "logarktos_base_name")
+	if ok and type(name) == "string" and name ~= "" then return name end
+	-- Fall back to the current name with any known AI app prefix stripped.
+	local current = M.get(tab)
+	if not current then return nil end
+	local envfile = require("logarktos.envfile")
+	local app, rest = current:match("^([%w]+)%-(.+)$")
+	if app and rest and envfile.AI_APPS[app:lower()] then return rest end
+	return current
+end
+
+--- Prefix the tab title with an AI CLI name: `codex-RunningWild`.
+--- The base (pre-prefix) title is preserved so later app switches only replace
+--- the prefix. Does nothing when `app` is empty/unknown or when the tab has a
+--- manual name (manual always wins).
+function M.apply_ai_app(app, tab)
+	tab = get_tab(tab)
+	if not app or app == "" then return false end
+	app = tostring(app):lower():gsub("%.exe$", "")
+	local envfile = require("logarktos.envfile")
+	if not envfile.AI_APPS[app] then return false end
+
+	-- Manual renames always win; leave them alone.
+	if M.get_priority(tab) >= P.manual then return false end
+
+	local base = M.get_base_name(tab) or M.get(tab)
+	if not base or base == "" then return false end
+
+	local ok_prev, prev = pcall(vim.api.nvim_tabpage_get_var, tab, "logarktos_ai_app")
+	if ok_prev and prev == app then
+		local current = M.get(tab)
+		if current == (app .. "-" .. base) then return true end
+	end
+
+	M.set_base_name(tab, base)
+	vim.api.nvim_tabpage_set_var(tab, "logarktos_ai_app", app)
+	-- Keep folder-tier priority so later folder renames can still update the base
+	-- if desired; the displayed name carries the app prefix. keep_base avoids
+	-- re-deriving the base from the prefixed string.
+	M.set(tab, app .. "-" .. base, {
+		priority = math.max(M.get_priority(tab), P.folder),
+		keep_base = true,
+	})
+	return true
 end
 
 function M.is_locked(tab)

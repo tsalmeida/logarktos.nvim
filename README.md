@@ -75,6 +75,33 @@ bufferfiles = {
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
 | `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |
 
+### Per-project `logarktos.env`
+
+Any layout opened from a folder (`:AIMode`, `:Large`, `:Triple`, `:Work`, …)
+looks for a `logarktos.env` file in that folder. If the file is missing, nothing
+changes. If it is present, each line is a pane directive:
+
+```
+# comments and blank lines are ignored
+left:path/to/
+center:documents/prompts/
+right:frontend/sdl/
+left:codex --dangerously-bypass-approvals-and-sandbox
+right:grok --yolo
+```
+
+- **Paths** (absolute, or relative to the layout folder, and resolvable as a
+  directory — or looking like a path with `/` or a trailing slash) redirect
+  that pane's Oil view / terminal cwd.
+- **Commands** (anything else, e.g. `grok --yolo`) launch that shell command in
+  the pane's terminal. Useful keys:
+  - **AIMode `left:`** — auto-start the AI CLI in the left terminal.
+  - **WorkMode `right:`** — first command → top-right terminal, second →
+    bottom-right (e.g. `right: codex` then `right: grok --yolo`).
+
+Without a `logarktos.env`, AIMode still defaults the right Oil column to
+`frontend/sdl/` when that folder exists (same as writing `right:frontend/sdl/`).
+
 ### Smart tab names
 
 Every layout names its tab from the buffer it centres on. Names carry a
@@ -83,6 +110,11 @@ clue wins and sticks, while arrangement-only labels stay disposable. Inferred
 names are capped (default 12 chars); `:LogarktosTabRename` sets a manual name
 that always wins. An optional tabline renderer (`tabs.tabline = true`) shows the
 names with a ● for meaningful ones.
+
+**AIMode / Work terminals:** when an AI CLI is running in a watched terminal
+(`codex`, `grok`, `claude`, `agy`, …) — either auto-started from
+`logarktos.env` or launched by hand — the tab title becomes `codex-<title>`
+(app name + the existing folder/title name).
 
 ### Timestamped notes
 

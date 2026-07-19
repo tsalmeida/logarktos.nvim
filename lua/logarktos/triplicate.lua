@@ -9,8 +9,10 @@ local util = require("logarktos.util")
 local M = {}
 
 local function determine_start_dir()
+	-- Prefer setup / user logarktos.lua (start_dir → triplicate.dir).
 	local cfg = config.options.triplicate and config.options.triplicate.dir
 	if cfg and cfg ~= "" then return cfg end
+	-- Legacy env fallback for shells that still export it.
 	if vim.env.NVIM_START_DIR and vim.env.NVIM_START_DIR ~= "" then
 		return vim.env.NVIM_START_DIR
 	end

@@ -11,6 +11,7 @@ local config = require("logarktos.config")
 local tabs = require("logarktos.tabs")
 local util = require("logarktos.util")
 local envfile = require("logarktos.envfile")
+local rcfile = require("logarktos.rcfile")
 
 local M = {}
 
@@ -33,7 +34,7 @@ local function name_layout_tab(buf, layout_opts)
 	tabs.auto_name(nil, layout_opts)
 end
 
---- Load logarktos.env for the directory a layout is being opened from.
+--- Load optional path overrides (logarktos.lua / legacy .env) for non-AM/WM layouts.
 local function load_env(base)
 	if not base or base == "" then return nil end
 	return envfile.load(base)
@@ -353,14 +354,13 @@ local function ensure_ai_watch()
 end
 
 --- Shared Work layout: editor on the left, two terminals stacked on the right.
---- Honours logarktos.env `right:` lines (cwd and/or AI commands; first → top,
---- second → bottom).
+--- Uses / seeds the folder's logarktos.lua `work` section (create on first run).
 local function build_work_layout(opts)
 	opts = opts or {}
 	local buf = vim.api.nvim_get_current_buf()
 	local cwd = util.resolve_cwd(buf)
 	local base = cwd or vim.fn.getcwd()
-	local env = load_env(base)
+	local work = rcfile.ensure_work(base)
 	local view = vim.fn.winsaveview()
 
 	if opts.new_tab then
@@ -377,12 +377,9 @@ local function build_work_layout(opts)
 	if cwd then pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd)) end
 
 	-- Optional left path: open Oil there instead of the source buffer.
-	if env then
-		local left_path = envfile.first_path(env.left)
-		if left_path then
-			vim.api.nvim_set_current_win(left_win)
-			util.open_dir(left_path)
-		end
+	if work.left and work.left.path then
+		vim.api.nvim_set_current_win(left_win)
+		util.open_dir(work.left.path)
 	end
 
 	vim.cmd("rightbelow vsplit")
@@ -391,23 +388,8 @@ local function build_work_layout(opts)
 	vim.cmd("belowright split")
 	local rb = vim.api.nvim_get_current_win()
 
-	local top_spec = { cwd = base, cmd = nil, app = nil }
-	local bot_spec = { cwd = base, cmd = nil, app = nil }
-	if env then
-		-- Shared path cwd for both terminals; then commands in order.
-		local path_cwd = envfile.first_path(env.right) or base
-		local cmds = envfile.commands(env.right)
-		top_spec = { cwd = path_cwd, cmd = cmds[1] and cmds[1].cmd or nil, app = cmds[1] and cmds[1].app or nil }
-		bot_spec = { cwd = path_cwd, cmd = cmds[2] and cmds[2].cmd or nil, app = cmds[2] and cmds[2].app or nil }
-		-- If a command entry also had a preceding path-only interpretation, the
-		-- terminal_spec helper already handled mixed entries; re-walk for cwd
-		-- that appears after the first path when only cmds are present.
-		if not envfile.first_path(env.right) then
-			local walked = envfile.terminal_spec(env.right, base)
-			top_spec.cwd = walked.cwd
-			bot_spec.cwd = walked.cwd
-		end
-	end
+	local top_spec = work.top or { cwd = base, cmd = nil, app = nil }
+	local bot_spec = work.bot or { cwd = base, cmd = nil, app = nil }
 
 	ensure_ai_watch()
 	open_term(rt, top_spec.cwd, top_spec.cmd, { app = top_spec.app, watch_ai = true })
@@ -573,36 +555,18 @@ function M.new_large_tab()
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "large" })
 end
 
---- AI mode: three columns. The left one is a terminal for your AI CLI, one
---- width-step wider than an even third, and the cursor lands there in insert
---- mode so you can type straight away. The centre shows the PWD's
---- documents/prompts/ folder in Oil when it exists (else the PWD itself), and
---- the right shows frontend/sdl/ when the project has that folder, otherwise
---- the PWD in Oil.
----
---- When the base folder has a `logarktos.env`, left/center/right directives
---- override those defaults (paths for Oil/cwd, or a shell command on left for
---- auto-starting grok/codex/claude/agy/…).
+--- AI mode: three columns. Left = terminal (optional AI CLI), centre / right =
+--- Oil. Pane targets come from the folder's logarktos.lua `aimode` section;
+--- when that section is missing it is created from the first-run defaults
+--- (documents/prompts/, frontend/sdl/ when present, else the project folder).
 function M.ai_mode_tab()
 	local cwd = util.resolve_cwd(vim.api.nvim_get_current_buf())
 	local base = cwd or vim.fn.getcwd()
-	local env = load_env(base)
+	local am = rcfile.ensure_aimode(base)
 
-	local prompts = util.join(base, "documents", "prompts")
-	local center_dir = util.is_dir(prompts) and prompts or base
-	local project = util.project_root(base) or base
-	local sdl = util.join(project, "frontend", "sdl")
-	local right_dir = util.is_dir(sdl) and sdl or base
-
-	local left_spec = { cwd = base, cmd = nil, app = nil }
-	if env then
-		left_spec = envfile.terminal_spec(env.left, base)
-		local c = envfile.first_path(env.center)
-		if c then center_dir = c end
-		local r = envfile.first_path(env.right)
-		if r then right_dir = r end
-		-- A right-side command in AI mode is unusual (right is Oil); ignore cmds.
-	end
+	local left_spec = am.left or { cwd = base, cmd = nil, app = nil }
+	local center_dir = (am.center and am.center.path) or base
+	local right_dir = (am.right and am.right.path) or base
 
 	vim.cmd("tabnew")
 	local mid = vim.api.nvim_get_current_win()
@@ -618,7 +582,7 @@ function M.ai_mode_tab()
 	util.open_dir(right_dir)
 
 	ensure_ai_watch()
-	open_term(left, left_spec.cwd, left_spec.cmd, {
+	open_term(left, left_spec.cwd or base, left_spec.cmd, {
 		app = left_spec.app,
 		watch_ai = true,
 	})
@@ -634,7 +598,7 @@ function M.ai_mode_tab()
 	-- name when the PWD is inside a project, else the plain folder name.
 	local folder = util.project_or_dir_name(base)
 	if folder and folder ~= "" then tabs.apply_folder(folder) end
-	-- If logarktos.env auto-started an AI CLI, prefix immediately: codex-Title.
+	-- If logarktos.lua auto-started an AI CLI, prefix immediately: codex-Title.
 	if left_spec.app then tabs.apply_ai_app(left_spec.app) end
 
 	-- Land in the terminal, ready to type. Deferred so the layout has settled

@@ -95,6 +95,7 @@ local function actions()
 
 		-- optional AI
 		suggest_filename    = { "n", function() require("logarktos.ai").suggest_filename() end, "AI: suggest filename" },
+		send_to_ai          = { { "n", "v" }, function() require("logarktos.ai").send_to_ai() end, "AI: analyze selection/buffer" },
 	}
 end
 

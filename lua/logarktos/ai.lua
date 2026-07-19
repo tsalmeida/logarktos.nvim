@@ -89,15 +89,30 @@ local function strip_template(lines, template_path)
 	return kept, removed
 end
 
+local function api_key_missing_msg(env_name)
+	local path = require("logarktos.rcfile").user_path()
+	return table.concat({
+		(env_name or "OPENAI_API_KEY") .. " is not set.",
+		"Put your OpenAI API key in a gitignored .env next to your Neovim config:",
+		"  OPENAI_API_KEY=sk-…",
+		"or export that variable in your shell.",
+		"Model / limits / default instruction live in:",
+		"  " .. path,
+	}, "\n")
+end
+
+local function resolve_model(cfg)
+	return util.getenv_trim(cfg.model_env or "OPENAI_MODEL") or cfg.model or "gpt-4o-mini"
+end
+
 local function call_openai(messages)
 	local cfg = ai_cfg()
 	local api_key = util.getenv_trim(cfg.api_key_env or "OPENAI_API_KEY")
 	if not api_key then
-		util.notify(("%s is not set."):format(cfg.api_key_env or "OPENAI_API_KEY"),
-			vim.log.levels.ERROR, "SuggestFilename")
+		util.notify(api_key_missing_msg(cfg.api_key_env), vim.log.levels.ERROR, "SuggestFilename")
 		return nil, nil
 	end
-	local model = util.getenv_trim(cfg.model_env or "OPENAI_MODEL") or cfg.model or "gpt-4o-mini"
+	local model = resolve_model(cfg)
 	local json = vim.json.encode({ model = model, messages = messages })
 
 	local res = vim.system({
@@ -274,6 +289,181 @@ function M.suggest_filename()
 	else
 		util.notify(string.format("Suggested buffer name: %s (model: %s)", final_name, model), vim.log.levels.INFO, "SuggestFilename")
 	end
+end
+
+-- ── send selection / buffer to AI (space+ai) ─────────────────────────────────
+
+local function get_text_from_context()
+	local mode = vim.fn.mode()
+	local has_visual = mode:find("[vV\022]") ~= nil
+	if has_visual then
+		local _, ls, cs = unpack(vim.fn.getpos("'<"))
+		local _, le, ce = unpack(vim.fn.getpos("'>"))
+		if ls > le or (ls == le and cs > ce) then ls, le, cs, ce = le, ls, ce, cs end
+		local lines = vim.api.nvim_buf_get_lines(0, ls - 1, le, true)
+		if #lines == 0 then return "", true end
+		lines[1] = string.sub(lines[1], cs > 0 and cs or 1)
+		lines[#lines] = string.sub(lines[#lines], 1, ce > 0 and ce or #lines[#lines])
+		return table.concat(lines, "\n"), true
+	end
+	return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, true), "\n"), false
+end
+
+local function new_right_split_with(lines)
+	vim.cmd("vnew")
+	local buf = vim.api.nvim_get_current_buf()
+	vim.bo[buf].buftype = ""
+	vim.bo[buf].bufhidden = "wipe"
+	vim.bo[buf].swapfile = false
+	vim.bo[buf].filetype = "markdown"
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	vim.bo[buf].modified = true
+	pcall(vim.cmd, "doautocmd <nomodeline> BufModifiedSet")
+end
+
+local function extract_text_from_chat(data)
+	local c = data and data.choices and data.choices[1]
+	local msg = c and c.message
+	if msg and type(msg.content) == "string" and msg.content ~= "" then
+		return msg.content
+	end
+	if msg and type(msg.content) == "table" then
+		local parts = {}
+		for _, seg in ipairs(msg.content) do
+			if type(seg) == "table" and type(seg.text) == "string" then
+				parts[#parts + 1] = seg.text
+			end
+		end
+		if #parts > 0 then return table.concat(parts, "\n") end
+	end
+	return nil
+end
+
+--- Send the visual selection (or whole buffer) to OpenAI and show the reply
+--- in a right-hand split. Model / max chars / default instruction come from
+--- the user logarktos.lua (and setup); the API key from $OPENAI_API_KEY.
+function M.send_to_ai()
+	if not M.enabled() then
+		util.notify(
+			"AI is disabled. Enable it in your logarktos.lua (`ai = { enabled = true }`) "
+				.. "or setup({ ai = { enabled = true } }).",
+			vim.log.levels.WARN,
+			"AI"
+		)
+		return
+	end
+
+	local cfg = ai_cfg()
+	local env_name = cfg.api_key_env or "OPENAI_API_KEY"
+	local api_key = util.getenv_trim(env_name)
+	if not api_key then
+		util.notify(api_key_missing_msg(env_name), vim.log.levels.ERROR, "AI")
+		return
+	end
+
+	local model = resolve_model(cfg)
+	local max_chars = tonumber(cfg.max_input_chars) or 1000
+	local instruction = cfg.default_instruction
+		or "Please analyze or improve the following content."
+
+	local text, had_visual = get_text_from_context()
+	if text == "" then
+		util.notify("Nothing to send (empty selection/buffer).", vim.log.levels.WARN, "AI")
+		return
+	end
+
+	local truncated = false
+	if #text > max_chars then
+		text = text:sub(1, max_chars)
+		truncated = true
+	end
+
+	local payload = {
+		model = model,
+		messages = {
+			{ role = "system", content = instruction },
+			{ role = "user", content = text },
+		},
+	}
+	local json = vim.json.encode(payload)
+
+	local res = vim.system({
+		"curl", "-sS",
+		"-H", "Authorization: Bearer " .. api_key,
+		"-H", "Content-Type: application/json",
+		"-d", "@-",
+		"-w", "\n__CURL_STATUS:%{http_code}",
+		"https://api.openai.com/v1/chat/completions",
+	}, { stdin = json, text = true }):wait()
+
+	if res.code ~= 0 then
+		util.notify(
+			"Request failed (curl exit " .. tostring(res.code) .. ").\n" .. (res.stderr or ""),
+			vim.log.levels.ERROR,
+			"AI"
+		)
+		return
+	end
+
+	local stdout = res.stdout or ""
+	local marker = "__CURL_STATUS:"
+	local http_status
+	local body = stdout
+	local code_pos = stdout:match("()\n" .. marker .. "%d%d%d$")
+	local code_str = stdout:match("\n" .. marker .. "(%d%d%d)$")
+	if code_pos and code_str then
+		http_status = tonumber(code_str)
+		body = stdout:sub(1, code_pos - 1)
+	end
+	body = body:gsub("%s+$", "")
+
+	if http_status and (http_status < 200 or http_status >= 300) then
+		local msg
+		local okj, data = pcall(vim.json.decode, body)
+		if okj and data and data.error then
+			msg = type(data.error) == "table" and (data.error.message or data.error.type) or tostring(data.error)
+		end
+		util.notify(
+			string.format("HTTP %s from AI provider.", tostring(http_status))
+				.. (msg and ("\n" .. msg) or (body ~= "" and ("\n" .. body) or "")),
+			vim.log.levels.ERROR,
+			"AI"
+		)
+		return
+	end
+
+	local ok, data = pcall(vim.json.decode, body)
+	if not ok then
+		util.notify("Could not parse OpenAI response JSON.", vim.log.levels.ERROR, "AI")
+		return
+	end
+	if data.error then
+		local em = type(data.error) == "table" and (data.error.message or data.error.type) or tostring(data.error)
+		util.notify("OpenAI error: " .. em, vim.log.levels.ERROR, "AI")
+		return
+	end
+
+	local reply = extract_text_from_chat(data)
+	if not reply or reply == "" then
+		util.notify("OpenAI returned no textual content.", vim.log.levels.WARN, "AI")
+		return
+	end
+
+	local stamp = os.date("%Y-%m-%d %H:%M:%S")
+	local header = {
+		("# AI response — %s"):format(stamp),
+		("**Model:** %s"):format(model),
+		("**Source:** %s"):format(had_visual and "selection" or "buffer"),
+	}
+	if truncated then
+		header[#header + 1] = ("**Note:** input truncated to %d chars"):format(max_chars)
+	end
+	header[#header + 1] = ""
+
+	local out_lines = {}
+	vim.list_extend(out_lines, header)
+	vim.list_extend(out_lines, vim.split(vim.trim(reply), "\n", { plain = true }))
+	new_right_split_with(out_lines)
 end
 
 return M

@@ -77,6 +77,7 @@ local function specs()
 
 		-- optional AI
 		{ "SuggestFilename", "SuggestFilename", function() require("logarktos.ai").suggest_filename() end, { desc = "AI: suggest a filename (needs ai.enabled)" } },
+		{ "SendToAI", "SendToAI", function() require("logarktos.ai").send_to_ai() end, { desc = "AI: send selection/buffer (needs ai.enabled)", range = true } },
 	}
 end
 

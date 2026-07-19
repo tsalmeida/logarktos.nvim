@@ -38,6 +38,8 @@ local function default_root()
 end
 
 local function get_root_dir()
+	-- Prefer setup / user logarktos.lua (bufferfiles.dir). $BUFFERFILES_DIR is
+	-- still honoured as a last-resort override for old shells.
 	local cfg = config.options.bufferfiles and config.options.bufferfiles.dir
 	if cfg and cfg ~= "" then
 		local p = vim.fs.normalize(cfg)

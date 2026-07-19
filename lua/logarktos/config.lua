@@ -57,6 +57,7 @@ M.default_keymaps = {
 	resize_down         = "<down>",
 	-- optional AI
 	suggest_filename    = false,
+	send_to_ai          = false,
 }
 
 M.defaults = {
@@ -74,7 +75,8 @@ M.defaults = {
 	bufferfiles = {
 		enabled = true,
 		-- Root folder for scratch bufferfiles. Defaults to a private state dir.
-		-- Also honours $BUFFERFILES_DIR when this is nil.
+		-- Prefer setting this in stdpath("config")/logarktos.lua; $BUFFERFILES_DIR
+		-- is still accepted as a legacy fallback when dir is nil.
 		dir = nil,
 		-- Keep at most this many files in the root; older ones move to archive/.
 		keep = 20,
@@ -136,14 +138,19 @@ M.defaults = {
 		logs_bucket = "Auto Ordered Logs",
 	},
 
-	-- Optional AI filename suggester. Disabled by default; needs an API key.
+	-- Optional AI helpers (filename suggester + space+ai send). Disabled by
+	-- default in the plugin; the user's logarktos.lua usually enables them.
+	-- The API key is never stored in logarktos.lua — only the env var *name*.
 	ai = {
 		enabled = false,
 		api_key_env = "OPENAI_API_KEY",
+		-- Optional override from the environment (e.g. OPENAI_MODEL); when
+		-- unset, `model` below is used.
 		model_env = "OPENAI_MODEL",
 		model = "gpt-4o-mini",
 		max_input_chars = 1000,
 		max_name_len = 60,
+		default_instruction = "Please comment on the following content:",
 	},
 }
 

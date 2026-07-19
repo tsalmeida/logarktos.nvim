@@ -56,11 +56,13 @@ with `:LogarktosBufferFiles`.
 ```lua
 bufferfiles = {
   enabled = true,
-  dir = nil,        -- default: stdpath("state")/logarktos/bufferfiles (or $BUFFERFILES_DIR)
+  dir = nil,        -- default: stdpath("state")/logarktos/bufferfiles
   keep = 20,
   prefix = "buffer-",
 }
 ```
+
+Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env vars.
 
 ### Layouts — tabs as workspaces
 
@@ -70,37 +72,51 @@ bufferfiles = {
 | `:LogarktosLarge` / `:LogarktosNewLarge` | wide editor flanked by narrow scratch buffers |
 | `:LogarktosFocus` | editor centred with empty side buffers |
 | `:LogarktosWork` / `:LogarktosHereWork` | editor plus two terminals (new tab / current tab) |
-| `:LogarktosAIMode` / `:AIMode` | terminal plus prompts/Oil columns; right Oil opens `frontend/sdl/` when the project has it |
+| `:LogarktosAIMode` / `:AIMode` | terminal plus prompts/Oil columns |
 | `:LogarktosTriple` / `:LogarktosDual` | synchronized views of the same buffer |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
 | `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |
+| `:LogarktosSendToAI` | send selection/buffer to OpenAI (needs `ai.enabled` + API key) |
 
-### Per-project `logarktos.env`
+### `logarktos.lua` — user prefs + per-folder layouts
 
-Any layout opened from a folder (`:AIMode`, `:Large`, `:Triple`, `:Work`, …)
-looks for a `logarktos.env` file in that folder. If the file is missing, nothing
-changes. If it is present, each line is a pane directive:
+Two scopes share the same filename and Lua table format:
 
+1. **User file** — `stdpath("config")/logarktos.lua`  
+   Created on first setup if missing. Holds machine/user logarktos data:
+   `start_dir` (Triplicate / “open start folder”), `ignore_dirs` (recent-files
+   panel), `bufferfiles`, `ai` (model, max input chars, default instruction),
+   and `bookmarks`. **Never put API keys here** — set `OPENAI_API_KEY` in the
+   environment or a gitignored `.env`. When the key is missing, AI commands
+   tell you where to put it.
+
+2. **Project files** — `logarktos.lua` in any folder you open a layout from  
+   Holds `aimode` / `work` pane targets. **`:AIMode` / `:LogarktosWork` /
+   `:LogarktosHereWork`** ensure the matching section exists: if the file or
+   section is missing, it is written from the first-run defaults (for AIMode:
+   `documents/prompts/` and `frontend/sdl/` when present; for Work: two plain
+   terminals). Later runs read the file. Sections can also be added into an
+   existing user file when you run those layouts from the Neovim config folder.
+
+```lua
+-- project or user file
+return {
+  aimode = {
+    left = { cmd = "grok --yolo" },
+    center = { path = "documents/prompts" },
+    right = { path = "frontend/sdl" },
+  },
+  work = {
+    right = {
+      { cmd = "codex" },
+      { cmd = "grok --yolo" },
+    },
+  },
+}
 ```
-# comments and blank lines are ignored
-left:path/to/
-center:documents/prompts/
-right:frontend/sdl/
-left:codex --dangerously-bypass-approvals-and-sandbox
-right:grok --yolo
-```
 
-- **Paths** (absolute, or relative to the layout folder, and resolvable as a
-  directory — or looking like a path with `/` or a trailing slash) redirect
-  that pane's Oil view / terminal cwd.
-- **Commands** (anything else, e.g. `grok --yolo`) launch that shell command in
-  the pane's terminal. Useful keys:
-  - **AIMode `left:`** — auto-start the AI CLI in the left terminal.
-  - **WorkMode `right:`** — first command → top-right terminal, second →
-    bottom-right (e.g. `right: codex` then `right: grok --yolo`).
-
-Without a `logarktos.env`, AIMode still defaults the right Oil column to
-`frontend/sdl/` when that folder exists (same as writing `right:frontend/sdl/`).
+Legacy `logarktos.env` (`left:…` lines) is still read and converted when no
+`logarktos.lua` exists yet.
 
 ### Smart tab names
 
@@ -113,7 +129,7 @@ names with a ● for meaningful ones.
 
 **AIMode / Work terminals:** when an AI CLI is running in a watched terminal
 (`codex`, `grok`, `claude`, `agy`, …) — either auto-started from
-`logarktos.env` or launched by hand — the tab title becomes `codex-<title>`
+`logarktos.lua` or launched by hand — the tab title becomes `codex-<title>`
 (app name + the existing folder/title name).
 
 ### Timestamped notes

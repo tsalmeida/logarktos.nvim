@@ -52,7 +52,26 @@ end
 --- Configure and activate logarktos.
 --- @param opts table|nil  see logarktos.config for the full schema
 function M.setup(opts)
-	local cfg = config.merge(opts)
+	opts = opts or {}
+
+	-- User file at stdpath("config")/logarktos.lua: start_dir, ignore_dirs,
+	-- bufferfiles, ai prefs, bookmarks, and optional aimode/work for that folder.
+	-- setup() opts win over the file so the plugin list can still force keymaps etc.
+	local rcfile = require("logarktos.rcfile")
+	local seed = {}
+	if opts.triplicate and opts.triplicate.dir then
+		seed.start_dir = opts.triplicate.dir
+	end
+	if opts.bufferfiles and opts.bufferfiles.dir then
+		seed.bufferfiles = { dir = opts.bufferfiles.dir }
+	end
+	if opts.ai then
+		seed.ai = vim.deepcopy(opts.ai)
+	end
+	local user = rcfile.ensure_user(seed)
+	local from_user = rcfile.user_to_setup_opts(user)
+	local merged = vim.tbl_deep_extend("force", from_user, opts)
+	local cfg = config.merge(merged)
 
 	if cfg.bufferfiles and cfg.bufferfiles.enabled then
 		require("logarktos.bufferfiles").setup()

@@ -37,14 +37,6 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 	callback = ensure_highlight,
 })
 
-local function store_path()
-	local cfg = config.options.bookmarks and config.options.bookmarks.store
-	if cfg and cfg ~= "" then return cfg end
-	local dir = vim.fs.joinpath(vim.fn.stdpath("data"), "logarktos")
-	vim.fn.mkdir(dir, "p")
-	return vim.fs.joinpath(dir, "bookmarks.json")
-end
-
 local function normpath(p)
 	if not p or p == "" then return "" end
 	p = p:gsub("\\", "/")
@@ -53,35 +45,57 @@ local function normpath(p)
 	return p
 end
 
+--- Bookmarks live in stdpath("config")/logarktos.lua (user file). Fall back to
+--- a legacy JSON store only when the user file has no bookmarks list yet.
 local function load_list()
-	local f = io.open(store_path(), "r")
-	if not f then return {} end
-	local ok, data = pcall(vim.json.decode, f:read("*a"))
-	f:close()
-	if not ok or type(data) ~= "table" then return {} end
+	local rcfile = require("logarktos.rcfile")
+	local from_user = rcfile.get_user_bookmarks()
+	local data = from_user
+	if not data then
+		-- One-shot migration from the old JSON stores.
+		local candidates = {
+			(config.options.bookmarks and config.options.bookmarks.store) or "",
+			vim.fs.joinpath(vim.fn.stdpath("data"), "bookmarks.json"),
+			vim.fs.joinpath(vim.fn.stdpath("data"), "logarktos", "bookmarks.json"),
+		}
+		for _, path in ipairs(candidates) do
+			if path ~= "" and util.exists(path) then
+				local f = io.open(path, "r")
+				if f then
+					local ok, decoded = pcall(vim.json.decode, f:read("*a"))
+					f:close()
+					if ok and type(decoded) == "table" then
+						data = decoded
+						break
+					end
+				end
+			end
+		end
+		if data then
+			rcfile.set_user_bookmarks(data)
+		else
+			data = {}
+		end
+	end
 
 	local unique, seen = {}, {}
 	local is_windows = vim.fn.has("win32") == 1
 	for _, p in ipairs(data) do
-		local n = normpath(p)
-		if is_windows then n = n:lower() end
-		if not seen[n] then
-			seen[n] = true
-			table.insert(unique, p)
+		if type(p) == "string" and p ~= "" then
+			local n = normpath(p)
+			if is_windows then n = n:lower() end
+			if not seen[n] then
+				seen[n] = true
+				table.insert(unique, p)
+			end
 		end
 	end
 	return unique
 end
 
 local function save_list(list)
-	local ok, text = pcall(vim.json.encode, list)
-	if not ok then
-		vim.notify("Bookmarks: could not encode JSON", vim.log.levels.ERROR)
-		return
-	end
-	local f = assert(io.open(store_path(), "w"))
-	f:write(text)
-	f:close()
+	local rcfile = require("logarktos.rcfile")
+	rcfile.set_user_bookmarks(list)
 end
 
 local function exists(path)

@@ -15,6 +15,19 @@ local rcfile = require("logarktos.rcfile")
 
 local M = {}
 
+--- Announce that a multi-window layout has finished assembling. A colorscheme
+--- with per-window rendering (chromaki's spotlight) listens for this to
+--- re-resolve the freshly built inactive windows: they can draw their buffers
+--- before the scheme attaches its inactive namespace, leaving active-coloured
+--- text on an already-darkened background until the next redraw. Deferred a tick
+--- so any layout that lands focus asynchronously (AI mode → its terminal) has
+--- settled before the refresh reads the active window. No-op when unlistened.
+local function announce_layout_built()
+	vim.schedule(function()
+		pcall(vim.api.nvim_exec_autocmds, "User", { pattern = "LogarktosLayoutBuilt", modeline = false })
+	end)
+end
+
 --- Name a freshly-built layout tab from its focus buffer.
 local function name_layout_tab(buf, layout_opts)
 	if buf and vim.api.nvim_buf_is_valid(buf) then
@@ -206,6 +219,7 @@ function M.focus_mode_tab()
 	vim.cmd("wincmd =")
 
 	name_layout_tab(vim.api.nvim_win_get_buf(middle_win), { layout = "focus" })
+	announce_layout_built()
 end
 
 --- Open a terminal in `win`. When `cmd` is set, run that shell command (AI CLI
@@ -420,6 +434,7 @@ function M.work_mode_tab()
 	-- Prefer the top terminal's AI app for the tab label when auto-started.
 	local app = info.top_app or info.bot_app
 	if app then tabs.apply_ai_app(app) end
+	announce_layout_built()
 end
 
 function M.here_work_mode()
@@ -432,6 +447,7 @@ function M.here_work_mode()
 	if folder and folder ~= "" then tabs.apply_folder(folder) end
 	local app = info.top_app or info.bot_app
 	if app then tabs.apply_ai_app(app) end
+	announce_layout_built()
 end
 
 --- Open `dir` in Oil in the current window; else the focus path of `buf`
@@ -469,6 +485,7 @@ function M.triple_mode_tab()
 	vim.cmd("wincmd =")
 
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "triple", dir = cwd })
+	announce_layout_built()
 end
 
 function M.dual_mode_tab()
@@ -492,6 +509,7 @@ function M.dual_mode_tab()
 	vim.cmd("wincmd =")
 
 	name_layout_tab(vim.api.nvim_win_get_buf(left), { layout = "dual", dir = cwd })
+	announce_layout_built()
 end
 
 function M.large_mode_tab()
@@ -533,6 +551,7 @@ function M.large_mode_tab()
 	vim.api.nvim_set_current_win(mid)
 
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "large" })
+	announce_layout_built()
 end
 
 function M.new_large_tab()
@@ -558,6 +577,7 @@ function M.new_large_tab()
 	vim.api.nvim_set_current_win(mid)
 
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "large" })
+	announce_layout_built()
 end
 
 --- AI mode: three columns. Left = terminal (optional command), centre / right =
@@ -614,6 +634,10 @@ function M.ai_mode_tab()
 			vim.cmd("startinsert")
 		end
 	end)
+
+	-- Queued after the focus schedule above (FIFO), so the spotlight refresh it
+	-- triggers reads the terminal as the active window, not the centre Oil pane.
+	announce_layout_built()
 end
 
 function M.large_triplicate_tab()

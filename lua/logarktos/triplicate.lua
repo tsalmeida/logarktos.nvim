@@ -70,6 +70,11 @@ function M.open(opts)
 	end
 
 	tabs.auto_name(nil, { layout = "triplicate", dir = dir })
+	-- Let a per-window colorscheme (chromaki's spotlight) re-resolve the inactive
+	-- panes once they're all built; mirrors layouts.lua's announce_layout_built().
+	vim.schedule(function()
+		pcall(vim.api.nvim_exec_autocmds, "User", { pattern = "LogarktosLayoutBuilt", modeline = false })
+	end)
 	return true
 end
 

@@ -12,19 +12,20 @@
 --     bufferfiles = { dir = "C:/…/bufferfiles/" },
 --     ai = { model = "gpt-5-mini", max_input_chars = 1000, default_instruction = "…" },
 --     bookmarks = { "C:/path/to/file" },
---     aimode = { left = { cmd = "grok --yolo" }, center = { path = "documents/prompts" } },
+--     -- optional layout overrides for this folder (plain terminal + Oil by default):
+--     aimode = { left = {}, center = { path = "." }, right = { path = "." } },
 --     work = { right = { {}, {} } },
 --   }
 --
--- Example (any project folder — layout only):
+-- Example (any project folder — layout only; first-run seed is the plain version):
 --   return {
 --     aimode = {
---       left = { cmd = "grok --yolo" },
---       center = { path = "documents/prompts" },
---       right = { path = "frontend/sdl" },
+--       left = {},                      -- interactive terminal, no auto-start command
+--       center = { path = "." },        -- Oil at the folder (edit to e.g. documents/prompts)
+--       right = { path = "." },
 --     },
 --     work = {
---       right = { { cmd = "codex" }, { cmd = "grok --yolo" } },
+--       right = { {}, {} },             -- two plain terminals
 --     },
 --   }
 
@@ -412,17 +413,14 @@ local function pane_spec(pane, base)
 end
 
 --- Defaults AIMode would use with no config (relative form for storage).
-function M.default_aimode(base)
-	base = util.normalize(base)
-	local prompts = util.join(base, "documents", "prompts")
-	local center = util.is_dir(prompts) and prompts or base
-	local project = util.project_root(base) or base
-	local sdl = util.join(project, "frontend", "sdl")
-	local right = util.is_dir(sdl) and sdl or base
+--- Plain only: interactive terminal (no auto-start command) + Oil on the
+--- layout folder for both columns. No frontend/sdl or prompts heuristics —
+--- add those paths by hand in logarktos.lua when you want them.
+function M.default_aimode(_base)
 	return {
 		left = {}, -- terminal at base, no command
-		center = { path = M.rel_or_abs(center, base) or "." },
-		right = { path = M.rel_or_abs(right, base) or "." },
+		center = { path = "." },
+		right = { path = "." },
 	}
 end
 

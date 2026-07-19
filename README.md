@@ -93,26 +93,30 @@ Two scopes share the same filename and Lua table format:
 2. **Project files** — `logarktos.lua` in any folder you open a layout from  
    Holds `aimode` / `work` pane targets. **`:AIMode` / `:LogarktosWork` /
    `:LogarktosHereWork`** ensure the matching section exists: if the file or
-   section is missing, it is written from the first-run defaults (for AIMode:
-   `documents/prompts/` and `frontend/sdl/` when present; for Work: two plain
-   terminals). Later runs read the file. Sections can also be added into an
-   existing user file when you run those layouts from the Neovim config folder.
+   section is missing, it is written from the **plain** first-run defaults
+   (interactive terminal with no auto-start command; Oil columns on the layout
+   folder; Work’s two right terminals also plain). No special folders
+   (`frontend/sdl/`, etc.) are guessed — add those paths yourself when you want
+   them. Later runs read the file. Sections can also be added into an existing
+   user file when you run those layouts from the Neovim config folder.
 
 ```lua
--- project or user file
+-- What the plugin seeds on first use (plain defaults):
 return {
   aimode = {
-    left = { cmd = "grok --yolo" },
-    center = { path = "documents/prompts" },
-    right = { path = "frontend/sdl" },
+    left = {},                 -- interactive terminal, no command
+    center = { path = "." },   -- Oil at the layout folder
+    right = { path = "." },
   },
   work = {
-    right = {
-      { cmd = "codex" },
-      { cmd = "grok --yolo" },
-    },
+    right = { {}, {} },        -- two plain terminals
   },
 }
+
+-- Optional hand-edits you might add later for a specific project:
+--   aimode.left = { cmd = "grok --yolo" }
+--   aimode.center = { path = "documents/prompts" }
+--   aimode.right = { path = "frontend/sdl" }
 ```
 
 Legacy `logarktos.env` (`left:…` lines) is still read and converted when no

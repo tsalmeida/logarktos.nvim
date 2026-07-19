@@ -555,10 +555,10 @@ function M.new_large_tab()
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "large" })
 end
 
---- AI mode: three columns. Left = terminal (optional AI CLI), centre / right =
+--- AI mode: three columns. Left = terminal (optional command), centre / right =
 --- Oil. Pane targets come from the folder's logarktos.lua `aimode` section;
---- when that section is missing it is created from the first-run defaults
---- (documents/prompts/, frontend/sdl/ when present, else the project folder).
+--- when that section is missing it is created as plain defaults (interactive
+--- terminal + Oil on the layout folder for both columns — no path heuristics).
 function M.ai_mode_tab()
 	local cwd = util.resolve_cwd(vim.api.nvim_get_current_buf())
 	local base = cwd or vim.fn.getcwd()

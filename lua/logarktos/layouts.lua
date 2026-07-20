@@ -222,14 +222,16 @@ function M.focus_mode_tab()
 	announce_layout_built()
 end
 
---- Open a terminal in `win`. When `cmd` is set, run that shell command (AI CLI
---- etc.); otherwise open a plain interactive shell. Marks the buffer so AI-app
---- tab renaming can watch it when `watch_ai` is true.
+--- Open a terminal in `win`. Always starts an interactive shell as the terminal
+--- *job*. When `cmd` is set (e.g. AI CLI from logarktos.lua), the command is
+--- typed into that shell after a short delay — so exiting the program (e.g.
+--- `/exit` in an AI app) returns to the shell instead of ending the job,
+--- wiping the buffer, and collapsing a triple/work layout to fewer panes.
 ---
 --- When `cmd` is set, `b:logarktos_term_cmd` is written *before* termopen so
 --- config-side TermOpen hooks (e.g. feeding Set-ExecutionPolicy into interactive
---- PowerShell) can skip this buffer — chansend would otherwise land in the AI
---- CLI's stdin and garble the TUI.
+--- PowerShell) skip this buffer; we send policy (if needed) and then `cmd`
+--- ourselves in order, so nothing lands in the AI CLI's stdin.
 --- @return integer terminal buffer
 local function open_term(win, cwd, cmd, opts)
 	opts = opts or {}
@@ -238,19 +240,42 @@ local function open_term(win, cwd, cmd, opts)
 	vim.bo[t_buf].bufhidden = "wipe"
 	vim.api.nvim_win_set_buf(win, t_buf)
 	local term_opts = { cwd = cwd }
-	if cmd and cmd ~= "" then
+	local has_cmd = cmd and cmd ~= ""
+	if has_cmd then
 		-- Mark before termopen so TermOpen autocmds see it (they fire mid-call).
 		vim.b[t_buf].logarktos_term_cmd = cmd
 		local app = opts.app or envfile.ai_app_name(cmd)
 		if app then
 			vim.b[t_buf].logarktos_ai_app = app
 		end
-		-- String form goes through 'shell'/'shellcmdflag' so PATH and flags work
-		-- the same as typing the command by hand. shellcmdflag already carries
-		-- -ExecutionPolicy on Windows; do not also feed policy text via chansend.
-		vim.fn.termopen(cmd, term_opts)
-	else
-		vim.fn.termopen(vim.o.shell, term_opts)
+	end
+	-- Shell is always the job (never termopen(cmd)): auto-start must not own
+	-- the terminal process, or the layout pane dies when the program exits.
+	vim.fn.termopen(vim.o.shell, term_opts)
+	if has_cmd then
+		-- Wait for the shell prompt, then feed the auto-start line as if typed.
+		vim.defer_fn(function()
+			if not vim.api.nvim_buf_is_valid(t_buf) then return end
+			local id = vim.b[t_buf].terminal_job_id
+			if not id then return end
+			local sh = (vim.o.shell or ""):lower()
+			local is_ps = sh:find("pwsh", 1, true) or sh:find("powershell", 1, true)
+			if is_ps then
+				-- Interactive PowerShell normally gets Bypass via a TermOpen hook;
+				-- we skipped that hook (logarktos_term_cmd), so apply it here
+				-- before launching the CLI so the session stays usable after exit.
+				vim.fn.chansend(id, "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass\r")
+				vim.defer_fn(function()
+					if not vim.api.nvim_buf_is_valid(t_buf) then return end
+					local jid = vim.b[t_buf].terminal_job_id
+					if jid then
+						vim.fn.chansend(jid, cmd .. "\r")
+					end
+				end, 80)
+			else
+				vim.fn.chansend(id, cmd .. "\r")
+			end
+		end, 80)
 	end
 	if opts.watch_ai then
 		vim.b[t_buf].logarktos_watch_ai = true
@@ -258,13 +283,13 @@ local function open_term(win, cwd, cmd, opts)
 	return t_buf
 end
 
---- Best-effort: detect a running AI CLI child of a terminal job (or the job
---- itself when the terminal was opened with the AI command directly).
+--- Best-effort: detect a running AI CLI child of a terminal job (auto-start
+--- feeds the CLI into the shell; manual launch is the same shape).
 local function detect_ai_app_for_buf(buf)
 	if not buf or not vim.api.nvim_buf_is_valid(buf) then return nil end
 	if vim.bo[buf].buftype ~= "terminal" then return nil end
 
-	-- Direct launch stores the app on the buffer.
+	-- Auto-start stores the intended app on the buffer (shell remains the job).
 	local tagged = vim.b[buf].logarktos_ai_app
 	if type(tagged) == "string" and tagged ~= "" then return tagged end
 
@@ -279,8 +304,8 @@ local function detect_ai_app_for_buf(buf)
 		end
 	end
 
-	-- Check the terminal job process itself (direct `termopen("codex …")`) and
-	-- its children (AI CLI launched from an interactive shell).
+	-- Check the terminal job process itself and its children (AI CLI launched
+	-- from the interactive shell — auto-start or typed by hand).
 	local ok_job, job_id = pcall(function() return vim.b[buf].terminal_job_id end)
 	if not ok_job or not job_id then return nil end
 	local ok_pid, pid = pcall(vim.fn.jobpid, job_id)

@@ -117,6 +117,10 @@ return {
 }
 ```
 
+Non-empty `cmd` values are typed into an interactive shell (the shell remains
+the terminal job). Exiting the program (`/exit` in an AI CLI, etc.) returns
+you to that shell; the pane stays open and the layout does not collapse.
+
 Legacy `logarktos.env` (`left:…` lines) is still read and converted when no
 `logarktos.lua` exists yet.
 

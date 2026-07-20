@@ -202,6 +202,48 @@ local function autosave_bufferfile(buf)
 	end
 end
 
+-- Debounce autosaves. BufModifiedSet fires on every keystroke once a bufferfile
+-- is named: each immediate write was a full sync disk round-trip (and then
+-- BufWritePost → maintain_now). That felt like typing lag especially under
+-- Neovide. Keep naming instant; only delay the write until typing pauses.
+local AUTOSAVE_MS = 750
+local pending_autosave = {} -- buf -> uv_timer_t
+
+local function cancel_pending_autosave(buf)
+	local t = pending_autosave[buf]
+	if not t then return end
+	pending_autosave[buf] = nil
+	pcall(function()
+		t:stop()
+		t:close()
+	end)
+end
+
+local function schedule_autosave(buf)
+	cancel_pending_autosave(buf)
+	local t = uv.new_timer()
+	pending_autosave[buf] = t
+	t:start(AUTOSAVE_MS, 0, vim.schedule_wrap(function()
+		if pending_autosave[buf] == t then
+			pending_autosave[buf] = nil
+			pcall(function()
+				t:stop()
+				t:close()
+			end)
+		end
+		if vim.api.nvim_buf_is_valid(buf) then
+			autosave_bufferfile(buf)
+		end
+	end))
+end
+
+local function flush_autosave(buf)
+	cancel_pending_autosave(buf)
+	if vim.api.nvim_buf_is_valid(buf) then
+		autosave_bufferfile(buf)
+	end
+end
+
 local function next_path()
 	local dir = get_root_dir()
 	local timestamp = os.date("%Y%m%d-%H%M%S")
@@ -328,9 +370,13 @@ function M.setup()
 			assign_name(args.buf)
 			if not vim.api.nvim_buf_is_loaded(args.buf) then return end
 			if not vim.api.nvim_buf_get_option(args.buf, "modified") then return end
-			autosave_bufferfile(args.buf)
+			-- Only schedule for real bufferfiles (named empties get assign_name
+			-- first; next modified event will hit is_bufferfile).
+			if is_bufferfile(args.buf) then
+				schedule_autosave(args.buf)
+			end
 		end,
-		desc = "Auto-assign and autosave bufferfiles when modified",
+		desc = "Auto-assign and debounced-autosave bufferfiles when modified",
 	})
 
 	vim.api.nvim_create_autocmd("BufEnter", {
@@ -348,11 +394,15 @@ function M.setup()
 	vim.api.nvim_create_autocmd({ "BufLeave", "BufUnload", "BufWipeout" }, {
 		group = group,
 		callback = function(args)
+			-- Flush any pending debounced save before the buffer goes away.
+			if is_bufferfile(args.buf) or pending_autosave[args.buf] then
+				flush_autosave(args.buf)
+			end
 			if vim.b[args.buf].bufferfile_confirm_active then
 				ensure_confirm_restored(args.buf)
 			end
 		end,
-		desc = "Restore confirm option after leaving bufferfiles",
+		desc = "Flush bufferfile autosave and restore confirm on leave",
 	})
 
 	vim.api.nvim_create_autocmd("BufWritePost", {
@@ -374,6 +424,10 @@ function M.setup()
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		group = group,
 		callback = function()
+			-- Flush every pending debounced save first.
+			for buf in pairs(pending_autosave) do
+				flush_autosave(buf)
+			end
 			while confirm_state.level > 0 do restore_confirm() end
 			M.clean_empty()
 			maintain_now()
@@ -385,6 +439,9 @@ function M.setup()
 	vim.api.nvim_create_autocmd("QuitPre", {
 		group = group,
 		callback = function()
+			for buf in pairs(pending_autosave) do
+				flush_autosave(buf)
+			end
 			for _, buf in ipairs(vim.api.nvim_list_bufs()) do
 				if vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_option(buf, "modifiable") then
 					local name = vim.api.nvim_buf_get_name(buf)

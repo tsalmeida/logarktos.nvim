@@ -19,13 +19,23 @@ local M = {}
 --- with per-window rendering (chromaki's spotlight) listens for this to
 --- re-resolve the freshly built inactive windows: they can draw their buffers
 --- before the scheme attaches its inactive namespace, leaving active-coloured
---- text on an already-darkened background until the next redraw. Deferred a tick
---- so any layout that lands focus asynchronously (AI mode → its terminal) has
---- settled before the refresh reads the active window. No-op when unlistened.
+--- text on an already-darkened background until the next redraw.
+---
+--- Two passes:
+---   • next tick — after any layout that lands focus asynchronously (AI mode →
+---     its terminal) has settled, so the refresh reads the real active window;
+---   • ~80ms later — Oil listings / treesitter often finish painting after the
+---     initial layout, and need a second flatten+repaint.
+--- No-op when unlistened.
 local function announce_layout_built()
-	vim.schedule(function()
-		pcall(vim.api.nvim_exec_autocmds, "User", { pattern = "LogarktosLayoutBuilt", modeline = false })
-	end)
+	local function fire()
+		pcall(vim.api.nvim_exec_autocmds, "User", {
+			pattern = "LogarktosLayoutBuilt",
+			modeline = false,
+		})
+	end
+	vim.schedule(fire)
+	vim.defer_fn(fire, 80)
 end
 
 --- Name a freshly-built layout tab from its focus buffer.

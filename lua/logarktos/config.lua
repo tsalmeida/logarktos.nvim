@@ -140,6 +140,8 @@ M.defaults = {
 		files_bucket = "Auto Ordered Files",
 		folders_bucket = "Auto Ordered Folders",
 		logs_bucket = "Auto Ordered Logs",
+		-- Per-folder overrides live in that folder's logarktos.lua under
+		-- `organize` (ignore / fixed / files). Plugin defaults for buckets only.
 	},
 
 	-- Optional AI helpers (filename suggester + space+ai send). Disabled by

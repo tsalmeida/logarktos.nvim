@@ -158,7 +158,21 @@ that Oil directory's `archive/` folder.
 ### Organize
 
 - `:LogarktosOrganize` — sort a directory's loose files and folders into dated
-  buckets, with a log of everything moved.
+  buckets, with a log of everything moved. Skips `documents/`, `logarktos.lua`,
+  and the Auto Ordered* buckets by default. Settings live in that folder's
+  `logarktos.lua` under `organize` (written on first run if missing):
+
+  ```lua
+  organize = {
+    -- basenames skipped; add more as needed
+    ignore = { "documents", "logarktos.lua" },
+    -- emptied into folders_bucket/<name> (no date prefix); originals stay empty
+    fixed = { "fonts" },
+    -- "timestamps" (default) or "extensions" (no timestamp subfolder for files)
+    files = "timestamps",
+  },
+  ```
+
 - `:LogarktosTimestamp` — prefix folders with their created date (Oil).
 - `:LogarktosExtract` — extract every archive in an Oil directory into dated
   folders (needs 7-Zip or `tar`).

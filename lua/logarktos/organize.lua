@@ -195,9 +195,59 @@ local function move_children(source_dir, dest_dir)
 end
 
 -- ── Organize ─────────────────────────────────────────────────────────────────
+
+--- Normalize a config basename: trim, drop trailing slashes.
+local function organize_entry_name(s)
+	if type(s) ~= "string" then return nil end
+	s = vim.trim(s):gsub("[/\\]+$", "")
+	if s == "" or s == "." or s == ".." then return nil end
+	return s
+end
+
+--- Case-fold basenames on Windows so "Documents" matches "documents".
+local function organize_name_key(name)
+	if util.is_windows then return name:lower() end
+	return name
+end
+
+--- Build a set from a list of basenames (config ignore / fixed).
+local function name_set(list)
+	local set = {}
+	if type(list) ~= "table" then return set end
+	for _, raw in ipairs(list) do
+		local name = organize_entry_name(raw)
+		if name then set[organize_name_key(name)] = name end
+	end
+	return set
+end
+
+--- Empty a fixed folder into folders_bucket/<name>/; leave the original empty.
+local function empty_fixed_folder(source_dir, dest_root, folder_name, dir, moved_dirs)
+	ensure_dir(dest_root)
+	local handle = uv.fs_scandir(source_dir)
+	if not handle then return 0 end
+	local moved = 0
+	while true do
+		local child = uv.fs_scandir_next(handle)
+		if not child then break end
+		local from = util.join(source_dir, child)
+		local to = unique_path(util.join(dest_root, child))
+		if uv.fs_rename(from, to) then
+			moved = moved + 1
+			table.insert(moved_dirs, "- " .. folder_name .. "/" .. child
+				.. " ➜ " .. relpath(to, dir) .. " (fixed)")
+		end
+	end
+	return moved
+end
+
 function M.organize()
 	local dir = work_dir()
 	if not dir then return end
+
+	-- Ensure this folder's logarktos.lua has an `organize` block (creates/fills it).
+	local rcfile = require("logarktos.rcfile")
+	local folder_org = rcfile.ensure_organize(dir) or rcfile.default_organize()
 
 	local org = config.options.organize
 	local auto_files = util.join(dir, org.files_bucket)
@@ -209,12 +259,24 @@ function M.organize()
 
 	local ts = os.date("%Y%m%d_%H%M%S")
 	local date_part = ts:sub(1, 8)
-	local files_bucket = util.join(auto_files, ts)
+	-- "timestamps" (default): Auto Ordered Files/<ts>/<ext>/file
+	-- "extensions":           Auto Ordered Files/<ext>/file
+	local files_mode = folder_org.files
+	if files_mode ~= "extensions" then files_mode = "timestamps" end
+	local files_root = (files_mode == "extensions") and auto_files or util.join(auto_files, ts)
 
-	local ignored = {
-		[org.files_bucket] = true, [org.folders_bucket] = true, [org.logs_bucket] = true,
-		[".git"] = true, [".gitignore"] = true,
-	}
+	-- System buckets + VCS noise are always skipped (not configurable away).
+	local ignored = name_set(folder_org.ignore)
+	for _, name in ipairs({
+		org.files_bucket, org.folders_bucket, org.logs_bucket,
+		".git", ".gitignore",
+	}) do
+		ignored[organize_name_key(name)] = name
+	end
+	local fixed = name_set(folder_org.fixed)
+	-- Fixed folders that are also ignored are fully skipped.
+	for k in pairs(ignored) do fixed[k] = nil end
+
 	local handle = uv.fs_scandir(dir)
 	if not handle then return end
 
@@ -222,9 +284,14 @@ function M.organize()
 	while true do
 		local name, t = uv.fs_scandir_next(handle)
 		if not name then break end
-		if not (ignored[name] or name == "." or name == "..") then
+		if name ~= "." and name ~= ".." and not ignored[organize_name_key(name)] then
 			local source = util.join(dir, name)
-			if t == "directory" then
+			local key = organize_name_key(name)
+			if t == "directory" and fixed[key] then
+				local dest_root = util.join(auto_folders, fixed[key] or name)
+				local n = empty_fixed_folder(source, dest_root, name, dir, moved_dirs)
+				total = total + n
+			elseif t == "directory" then
 				local dest = unique_path(util.join(auto_folders, dated_folder_title(date_part, name)))
 				if uv.fs_rename(source, dest) then
 					total = total + 1
@@ -232,7 +299,7 @@ function M.organize()
 				end
 			else
 				local ext = name:match("%.([^.]+)$") or "no_extension"
-				local dest_dir = util.join(files_bucket, ext:lower())
+				local dest_dir = util.join(files_root, ext:lower())
 				ensure_dir(dest_dir)
 				local dest = unique_path(util.join(dest_dir, name))
 				if uv.fs_rename(source, dest) then
@@ -245,7 +312,11 @@ function M.organize()
 
 	if total > 0 then
 		local log_path = unique_path(util.join(auto_logs, ts .. ".md"))
-		local log = { "# Organize " .. ts, "", "Directory: " .. dir, "" }
+		local log = {
+			"# Organize " .. ts, "",
+			"Directory: " .. dir, "",
+			"files mode: " .. files_mode, "",
+		}
 		if #moved_files > 0 then
 			table.insert(log, "## Files")
 			vim.list_extend(log, moved_files)

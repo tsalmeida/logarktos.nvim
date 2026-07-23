@@ -129,8 +129,18 @@ local function quote_str(s)
 	return string.format("%q", s)
 end
 
-local function serialize_value(val, indent)
+-- One-line explainers emitted above known keys when writing logarktos.lua.
+-- Keys are dotted paths from the root table (e.g. "organize.files").
+local KEY_COMMENTS = {
+	organize = "per-folder :Organize settings",
+	["organize.ignore"] = 'basenames (files/folders) skipped by :Organize; add more as needed. Defaults: "documents", "logarktos.lua".',
+	["organize.fixed"] = 'folder names emptied into folders_bucket/<name> (no YYYYMMDD- prefix); originals stay empty in place for reuse.',
+	["organize.files"] = '"timestamps" = files_bucket/<ts>/<ext>/… (default) | "extensions" = files_bucket/<ext>/… (no timestamp folder)',
+}
+
+local function serialize_value(val, indent, path)
 	indent = indent or 0
+	path = path or ""
 	local pad = string.rep("  ", indent)
 	local pad1 = string.rep("  ", indent + 1)
 	local t = type(val)
@@ -154,12 +164,12 @@ local function serialize_value(val, indent)
 		end
 		if simple and #val <= 6 then
 			for _, v in ipairs(val) do
-				parts[#parts + 1] = serialize_value(v, 0)
+				parts[#parts + 1] = serialize_value(v, 0, path)
 			end
 			return "{ " .. table.concat(parts, ", ") .. " }"
 		end
 		for _, v in ipairs(val) do
-			parts[#parts + 1] = pad1 .. serialize_value(v, indent + 1)
+			parts[#parts + 1] = pad1 .. serialize_value(v, indent + 1, path)
 		end
 		return "{\n" .. table.concat(parts, ",\n") .. ",\n" .. pad .. "}"
 	end
@@ -171,6 +181,7 @@ local function serialize_value(val, indent)
 		bufferfiles = 3,
 		ai = 4,
 		bookmarks = 5,
+		organize = 6,
 		aimode = 10,
 		work = 11,
 		left = 20,
@@ -188,6 +199,9 @@ local function serialize_value(val, indent)
 		api_key_env = 45,
 		keep = 50,
 		prefix = 51,
+		ignore = 60,
+		fixed = 61,
+		files = 62,
 	}
 	local keys = {}
 	for k in pairs(val) do
@@ -204,21 +218,38 @@ local function serialize_value(val, indent)
 
 	if #keys == 0 then return "{}" end
 
-	local parts = {}
+	-- Emit comments without trailing commas (join commas only after real fields).
+	local lines = {}
 	for _, k in ipairs(keys) do
+		local child_path = path == "" and tostring(k) or (path .. "." .. tostring(k))
+		local comment = KEY_COMMENTS[child_path]
+		if comment then
+			lines[#lines + 1] = { kind = "comment", text = pad1 .. "-- " .. comment }
+		end
 		local key
 		if type(k) == "string" and k:match("^[%a_][%w_]*$") then
 			key = k
 		else
 			key = "[" .. serialize_value(k, 0) .. "]"
 		end
-		parts[#parts + 1] = pad1 .. key .. " = " .. serialize_value(val[k], indent + 1)
+		lines[#lines + 1] = {
+			kind = "field",
+			text = pad1 .. key .. " = " .. serialize_value(val[k], indent + 1, child_path),
+		}
 	end
-	return "{\n" .. table.concat(parts, ",\n") .. ",\n" .. pad .. "}"
+	local parts = {}
+	for _, line in ipairs(lines) do
+		if line.kind == "comment" then
+			parts[#parts + 1] = line.text
+		else
+			parts[#parts + 1] = line.text .. ","
+		end
+	end
+	return "{\n" .. table.concat(parts, "\n") .. "\n" .. pad .. "}"
 end
 
 function M.serialize(data)
-	local body = serialize_value(data or {}, 0)
+	local body = serialize_value(data or {}, 0, "")
 	return table.concat({
 		"-- logarktos.lua — project / user settings for logarktos.nvim",
 		"",
@@ -387,6 +418,69 @@ function M.parse_legacy_env(path, base)
 	return next(out) and out or {}
 end
 
+-- ── organize section (per-folder :Organize) ──────────────────────────────────
+
+--- Defaults written into every new/ensured `organize` block.
+function M.default_organize()
+	return {
+		ignore = { "documents", "logarktos.lua" },
+		fixed = {},
+		files = "timestamps", -- or "extensions"
+	}
+end
+
+--- Ensure `organize` exists in the folder's logarktos.lua; fill missing keys.
+--- Creates the file when missing. Called by :Organize and when brand-new
+--- logarktos.lua files are written.
+--- @return table organize settings (ignore / fixed / files)
+function M.ensure_organize(base)
+	base = util.normalize(base or vim.fn.getcwd())
+	local data = M.load_or_empty(base)
+	local path = M.path_in(base)
+	local file_missing = path and not util.exists(path)
+	local defaults = M.default_organize()
+	local changed = false
+
+	if type(data.organize) ~= "table" then
+		data.organize = vim.deepcopy(defaults)
+		changed = true
+	else
+		local org = data.organize
+		if type(org.ignore) ~= "table" then
+			org.ignore = vim.deepcopy(defaults.ignore)
+			changed = true
+		end
+		if type(org.fixed) ~= "table" then
+			org.fixed = vim.deepcopy(defaults.fixed)
+			changed = true
+		end
+		if type(org.files) ~= "string" or org.files == "" then
+			org.files = defaults.files
+			changed = true
+		end
+	end
+
+	if changed or file_missing or data._from_legacy then
+		M.save_dir(base, data)
+		data._from_legacy = nil
+		if changed and not file_missing then
+			util.notify("Wrote organize section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+		elseif file_missing then
+			util.notify("Created " .. (path or "logarktos.lua") .. " with organize settings", vim.log.levels.INFO)
+		end
+	end
+	return data.organize, data
+end
+
+--- Inject default organize into an in-memory table when the on-disk file is new.
+local function seed_organize_if_new_file(data, file_missing)
+	if file_missing and type(data.organize) ~= "table" then
+		data.organize = M.default_organize()
+		return true
+	end
+	return false
+end
+
 -- ── layout section ensure (AIMode / Work) ────────────────────────────────────
 
 local function pane_spec(pane, base)
@@ -441,6 +535,7 @@ function M.ensure_aimode(base)
 	if section_missing then
 		data.aimode = M.default_aimode(base)
 	end
+	seed_organize_if_new_file(data, file_missing)
 	if section_missing or file_missing or data._from_legacy then
 		M.save_dir(base, data)
 		data._from_legacy = nil
@@ -469,6 +564,7 @@ function M.ensure_work(base)
 	if section_missing then
 		data.work = M.default_work(base)
 	end
+	seed_organize_if_new_file(data, file_missing)
 	if section_missing or file_missing or data._from_legacy then
 		M.save_dir(base, data)
 		data._from_legacy = nil
@@ -520,6 +616,8 @@ local USER_DEFAULTS = {
 		api_key_env = "OPENAI_API_KEY",
 	},
 	bookmarks = {},
+	-- Per-folder organize defaults also seed the user config template.
+	organize = M.default_organize(),
 }
 
 local function migrate_bookmarks_json()

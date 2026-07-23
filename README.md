@@ -155,6 +155,13 @@ folder so the file disappears from the listing. From an Oil buffer it can also
 archive the current entry or a visual/ranged selection of Markdown files into
 that Oil directory's `archive/` folder.
 
+### logarktos.lua
+
+- `:Logarktos` — refresh the current folder's `logarktos.lua` (Oil dir, then
+  buffer dir, then cwd). Keeps every key already defined; adds any standard
+  categories/keys that are still missing (`organize`, `aimode`, `work`, and
+  nested defaults such as `organize.fixed`). Creates the file when absent.
+
 ### Organize
 
 - `:LogarktosOrganize` — sort a directory's loose files and folders into dated

@@ -22,8 +22,14 @@ local function recent_files_panel(dir)
 end
 
 -- Each entry: { long, short, fn, opts }. `short` may be nil (no alias).
+-- `long` is appended to "Logarktos" (use "" for the bare :Logarktos command).
 local function specs()
 	return {
+		-- refresh this folder's logarktos.lua (missing standard sections only)
+		{ "", nil, function() require("logarktos.rcfile").refresh() end, {
+			desc = "Refresh logarktos.lua: keep existing keys, add missing standard sections",
+		} },
+
 		-- layouts / workspaces
 		{ "Triplicate", "Triplicate", function(a)
 			local dir = (a.args ~= "") and vim.fn.fnamemodify(vim.fn.expand(a.args), ":p") or nil

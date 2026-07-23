@@ -481,6 +481,104 @@ local function seed_organize_if_new_file(data, file_missing)
 	return false
 end
 
+-- ── :Logarktos — refresh missing standard sections ───────────────────────────
+
+--- The standard per-folder logarktos.lua shape (all known top-level categories
+--- and their nested keys). Used by :Logarktos to fill gaps without overwriting.
+function M.folder_template(base)
+	return {
+		organize = M.default_organize(),
+		aimode = M.default_aimode(base),
+		work = M.default_work(base),
+	}
+end
+
+--- Deep-fill `target` from `template`: only add keys that are absent.
+--- Existing values (including empty tables/lists) are never replaced.
+--- Recurses into map-shaped tables; list tables are treated as atomic values.
+--- @return string[] dotted paths that were added
+local function deep_fill_missing(target, template, prefix)
+	prefix = prefix or ""
+	local added = {}
+	if type(target) ~= "table" or type(template) ~= "table" then
+		return added
+	end
+	for k, v in pairs(template) do
+		if type(k) == "string" or type(k) == "number" then
+			local path = prefix == "" and tostring(k) or (prefix .. "." .. tostring(k))
+			if target[k] == nil then
+				target[k] = vim.deepcopy(v)
+				added[#added + 1] = path
+			elseif type(target[k]) == "table" and type(v) == "table"
+				and not is_list(target[k]) and not is_list(v) then
+				vim.list_extend(added, deep_fill_missing(target[k], v, path))
+			end
+		end
+	end
+	return added
+end
+
+--- Directory for :Logarktos: Oil dir → current file's dir → cwd.
+local function refresh_work_dir()
+	if vim.bo.filetype == "oil" then
+		local dir = util.oil_dir(0)
+		if dir then return dir end
+	end
+	local name = vim.api.nvim_buf_get_name(0)
+	if name ~= "" then return vim.fn.fnamemodify(name, ":p:h") end
+	return vim.fn.getcwd()
+end
+
+--- Refresh this folder's logarktos.lua: keep every existing key, add any
+--- standard category/key that is still missing. Creates the file when absent.
+--- @param dir string|nil  folder to refresh (default: Oil / buffer / cwd)
+--- @return boolean ok, string[]|nil added_paths
+function M.refresh(dir)
+	dir = util.normalize(dir or refresh_work_dir())
+	if not dir or dir == "" then
+		util.notify("No directory to refresh", vim.log.levels.WARN)
+		return false, nil
+	end
+	if vim.fn.isdirectory(dir) ~= 1 then
+		util.notify("Not a directory: " .. dir, vim.log.levels.WARN)
+		return false, nil
+	end
+
+	local path = M.path_in(dir)
+	local data = M.load_or_empty(dir)
+	local file_missing = path and not util.exists(path)
+	local template = M.folder_template(dir)
+	local added = deep_fill_missing(data, template)
+
+	if not (file_missing or #added > 0 or data._from_legacy) then
+		util.notify((path or "logarktos.lua") .. " is already up to date", vim.log.levels.INFO)
+		return true, {}
+	end
+
+	if not M.save_dir(dir, data) then
+		return false, nil
+	end
+	data._from_legacy = nil
+	table.sort(added)
+
+	if file_missing then
+		util.notify(
+			"Created " .. (path or "logarktos.lua")
+				.. (#added > 0 and (" with " .. table.concat(added, ", ")) or ""),
+			vim.log.levels.INFO
+		)
+	elseif #added > 0 then
+		util.notify(
+			"Updated " .. (path or "logarktos.lua") .. " — added: " .. table.concat(added, ", "),
+			vim.log.levels.INFO
+		)
+	else
+		util.notify("Rewrote " .. (path or "logarktos.lua") .. " from legacy format", vim.log.levels.INFO)
+	end
+	util.refresh_oil()
+	return true, added
+end
+
 -- ── layout section ensure (AIMode / Work) ────────────────────────────────────
 
 local function pane_spec(pane, base)

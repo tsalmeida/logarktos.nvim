@@ -130,6 +130,10 @@ M.defaults = {
 		-- Marker in template.md that pins where typing should start: it is
 		-- stripped on creation and the cursor drops there in insert mode.
 		focus_marker = "*template_focus*",
+		-- Marker in template.md replaced with today's date as YYYYMMDD
+		-- (asterisks stripped). Processed before the focus marker so a
+		-- shared line still lands the cursor at the right column.
+		date_marker = "*YYYYMMDD*",
 	},
 
 	organize = {

@@ -142,8 +142,10 @@ names with a ● for meaningful ones.
 
 `:LogarktosNewMarkdown` creates a `YYYYMMDD - HHMMSS[ - Title].md` note in the
 current Oil directory (or cwd), optionally seeded from a `template.md` found
-there (a `# Title` placeholder is replaced with your title). When a template is
-used the note opens straight away; if the template contains the focus marker
+there (a `# Title` placeholder is replaced with your title). Any `*YYYYMMDD*`
+marker in the template is replaced with today's date in that format
+(configurable via `markdown.date_marker`). When a template is used the note
+opens straight away; if the template contains the focus marker
 `*template_focus*` (configurable via `markdown.focus_marker`) it is stripped and
 the cursor lands there in insert mode with the line centred. Without a template
 the behaviour is unchanged — in Oil you simply land on the new file.

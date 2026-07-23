@@ -138,6 +138,7 @@ function M.new_markdown(opts)
 		local template_name = config.options.markdown.template or "template.md"
 		local template_path = util.join(dir, template_name)
 		local marker = config.options.markdown.focus_marker or ""
+		local date_marker = config.options.markdown.date_marker or ""
 		local contents, used_template = {}, false
 		local focus -- { row = <1-based line>, col = <0-based byte col> } once found
 		if template_name ~= "" and uv.fs_stat(template_path) then
@@ -149,6 +150,17 @@ function M.new_markdown(opts)
 						if line == "# Title" then
 							contents[i] = "# " .. title
 							break
+						end
+					end
+				end
+				-- *YYYYMMDD* → today's date (e.g. 20260723). All occurrences.
+				-- Run before the focus marker so a shared line keeps a correct
+				-- cursor column after the shorter placeholder is expanded.
+				if date_marker ~= "" then
+					local today = os.date("%Y%m%d")
+					for i, line in ipairs(contents) do
+						if line:find(date_marker, 1, true) then
+							contents[i] = line:gsub(vim.pesc(date_marker), today)
 						end
 					end
 				end

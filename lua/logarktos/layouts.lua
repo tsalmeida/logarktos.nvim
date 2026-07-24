@@ -188,42 +188,28 @@ function M.focus_setup()
 end
 
 -- ── layout builders ──────────────────────────────────────────────────────────
+--- Focus: *this* buffer (or bookmark/recent selection) in the middle, empty
+--- sides. Never apply logarktos.lua pane paths — those belong to AIMode/Work/
+--- Triple project layouts. An empty/unnamed buffer must stay empty; do not
+--- fall through to Oil because cwd happens to have an aimode.center path.
 function M.focus_mode_tab()
 	local source_buf = vim.api.nvim_get_current_buf()
-	local cwd = util.resolve_cwd(source_buf)
-	local base = cwd or vim.fn.getcwd()
-	local env = load_env(base)
-	local left_dir = env and envfile.first_path(env.left) or nil
-	local center_dir = env and envfile.first_path(env.center) or nil
-	local right_dir = env and envfile.first_path(env.right) or nil
 	local view = vim.fn.winsaveview()
 	vim.cmd("tabnew")
 	local middle_win = vim.api.nvim_get_current_win()
-	if center_dir then
-		util.open_dir(center_dir)
-	else
-		-- List panels (bookmarks) → open selected path, not the list buffer itself.
-		util.open_focus_or_buf(source_buf, view)
-	end
+	-- List panels → selected path; Oil / file / empty → keep that buffer.
+	util.open_focus_or_buf(source_buf, view)
 	vim.cmd("leftabove vnew")
-	if left_dir then
-		util.open_dir(left_dir)
-	else
-		local l_buf = vim.api.nvim_get_current_buf()
-		vim.bo[l_buf].bufhidden = "wipe"
-		vim.bo[l_buf].swapfile = false
-	end
+	local l_buf = vim.api.nvim_get_current_buf()
+	vim.bo[l_buf].bufhidden = "wipe"
+	vim.bo[l_buf].swapfile = false
 	vim.api.nvim_set_current_win(middle_win)
 	vim.cmd("rightbelow vnew")
-	if right_dir then
-		util.open_dir(right_dir)
-	else
-		local r_buf = vim.api.nvim_get_current_buf()
-		vim.bo[r_buf].bufhidden = "wipe"
-		vim.bo[r_buf].swapfile = false
-	end
+	local r_buf = vim.api.nvim_get_current_buf()
+	vim.bo[r_buf].bufhidden = "wipe"
+	vim.bo[r_buf].swapfile = false
 	vim.api.nvim_set_current_win(middle_win)
-	if not center_dir and not util.is_list_panel(source_buf) then
+	if not util.is_list_panel(source_buf) then
 		vim.fn.winrestview(view)
 	end
 	vim.cmd("wincmd =")
@@ -552,17 +538,15 @@ function M.large_mode_tab()
 	local cwd = util.resolve_cwd(buf)
 	local base = cwd or vim.fn.getcwd()
 	local env = load_env(base)
+	-- Optional side-pane path overrides only; centre is always the focus buffer
+	-- (or bookmark/recent selection). Never replace centre with env.center —
+	-- that used to open Oil from aimode when the buffer was empty/unnamed.
 	local left_dir = env and envfile.first_path(env.left) or nil
-	local center_dir = env and envfile.first_path(env.center) or nil
 	local right_dir = env and envfile.first_path(env.right) or nil
 	local view = vim.fn.winsaveview()
 	vim.cmd("tabnew")
 	local mid = vim.api.nvim_get_current_win()
-	if center_dir then
-		util.open_dir(center_dir)
-	else
-		util.open_focus_or_buf(buf, view)
-	end
+	util.open_focus_or_buf(buf, view)
 	vim.cmd("leftabove vnew")
 	local left = vim.api.nvim_get_current_win()
 	if left_dir then

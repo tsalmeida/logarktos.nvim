@@ -51,9 +51,14 @@ local function entries_from_pane(pane, base)
 	return out
 end
 
---- Load optional path overrides for non-AIMode/Work layouts.
---- Prefers logarktos.lua `paths` / flat left-center-right / aimode panes;
---- falls back to legacy logarktos.env.
+--- Load optional path overrides for non-AIMode/Work layouts (Triple, Dual,
+--- Large sides, NewLarge). Only explicit layout paths count:
+---   • `paths = { left, center, right }`
+---   • or top-level `left` / `center` / `right`
+--- `aimode` is intentionally ignored here — it is for :AIMode only. Treating
+--- aimode as a general layout override made Focus/Large/Triple open Oil at
+--- aimode.center whenever cwd had a logarktos.lua (including empty buffers
+--- whose cwd fell back to a folder that once ran AIMode).
 function M.load(dir)
 	if not dir or dir == "" then return nil end
 	local data = rcfile.load_dir(dir)
@@ -69,10 +74,6 @@ function M.load(dir)
 		left = entries_from_pane(data.left, dir)
 		center = entries_from_pane(data.center, dir)
 		right = entries_from_pane(data.right, dir)
-	elseif type(data.aimode) == "table" then
-		left = entries_from_pane(data.aimode.left, dir)
-		center = entries_from_pane(data.aimode.center, dir)
-		right = entries_from_pane(data.aimode.right, dir)
 	else
 		return nil
 	end

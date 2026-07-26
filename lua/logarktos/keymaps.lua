@@ -16,6 +16,8 @@ local function open_oil_here()
 	if vim.fn.exists(":Oil") == 2 then vim.cmd("Oil") else vim.cmd("edit .") end
 end
 
+local function U() return require("logarktos.util") end
+
 -- action key → { mode, rhs, desc }. rhs is a function or a string.
 local function actions()
 	return {
@@ -53,10 +55,12 @@ local function actions()
 		-- windows
 		here_empty          = { "n", "<cmd>enew<CR>", "Empty buffer here" },
 		here_oil            = { "n", open_oil_here, "Oil here" },
-		here_terminal       = { "n", "<cmd>terminal<CR>", "Terminal here" },
+		-- Explicit interactive shell (Windows: pwsh + Bypass), not bare :terminal
+		-- which follows 'shell' (cmd.exe on Windows after the shell split).
+		here_terminal       = { "n", function() U().open_interactive_terminal() end, "Terminal here" },
 		split_empty         = { "n", "<cmd>vnew<CR>", "Split (empty)" },
 		split_oil           = { "n", function() vim.cmd("vsplit"); open_oil_here() end, "Split (Oil)" },
-		split_terminal      = { "n", "<cmd>vsplit | terminal<CR>", "Split (terminal)" },
+		split_terminal      = { "n", function() U().open_interactive_terminal({ vsplit = true }) end, "Split (terminal)" },
 		split_close         = { "n", "<cmd>close<CR>", "Close window" },
 
 		-- bufferfiles

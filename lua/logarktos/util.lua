@@ -13,6 +13,42 @@ end
 M.sep = package.config:sub(1, 1)
 M.is_windows = M.sep == "\\"
 
+--- Argv for an interactive user shell (list form for `termopen`).
+--- On Windows always starts pwsh/powershell with ExecutionPolicy Bypass on the
+--- argv — independent of Neovim's global `'shell'` (which stays cmd.exe so
+--- `:!` / plugins keep simple, fast quoting). No need to chansend Set-ExecutionPolicy.
+--- @return string[]
+function M.interactive_shell_argv()
+	if M.is_windows then
+		local ps = (vim.fn.executable("pwsh") == 1) and "pwsh" or "powershell"
+		return { ps, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass" }
+	end
+	local sh = vim.env.SHELL
+	if type(sh) == "string" and sh ~= "" then
+		return { sh }
+	end
+	return { vim.o.shell }
+end
+
+--- Open an interactive shell in the current window (or after a split).
+--- @param opts? { vsplit?: boolean, split?: boolean, cwd?: string, startinsert?: boolean }
+function M.open_interactive_terminal(opts)
+	opts = opts or {}
+	if opts.vsplit then
+		vim.cmd("vsplit")
+	elseif opts.split then
+		vim.cmd("split")
+	end
+	local term_opts = {}
+	if opts.cwd and opts.cwd ~= "" then
+		term_opts.cwd = opts.cwd
+	end
+	vim.fn.termopen(M.interactive_shell_argv(), term_opts)
+	if opts.startinsert ~= false then
+		vim.cmd("startinsert")
+	end
+end
+
 function M.join(...)
 	return vim.fs.joinpath(...)
 end

@@ -121,6 +121,12 @@ Non-empty `cmd` values are typed into an interactive shell (the shell remains
 the terminal job). Exiting the program (`/exit` in an AI CLI, etc.) returns
 you to that shell; the pane stays open and the layout does not collapse.
 
+On Windows, layout terminals and the `here_terminal` / `split_terminal` keymaps
+start **PowerShell with `-ExecutionPolicy Bypass`** via list-form `termopen`
+(`util.interactive_shell_argv()`). They do **not** use Neovim's global
+`'shell'` option, so configs can keep `'shell'` as `cmd.exe` for `:!` while
+interactive panes stay PowerShell-native.
+
 Legacy `logarktos.env` (`left:…` lines) is still read and converted when no
 `logarktos.lua` exists yet.
 

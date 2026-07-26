@@ -219,15 +219,15 @@ function M.focus_mode_tab()
 end
 
 --- Open a terminal in `win`. Always starts an interactive shell as the terminal
---- *job*. When `cmd` is set (e.g. AI CLI from logarktos.lua), the command is
---- typed into that shell after a short delay — so exiting the program (e.g.
---- `/exit` in an AI app) returns to the shell instead of ending the job,
---- wiping the buffer, and collapsing a triple/work layout to fewer panes.
+--- *job* (list-form `termopen` of `util.interactive_shell_argv()` — on Windows
+--- that is pwsh/powershell with Bypass on the argv, independent of `'shell'`).
+--- When `cmd` is set (e.g. AI CLI from logarktos.lua), the command is typed
+--- into that shell after a short delay — so exiting the program (e.g. `/exit`
+--- in an AI app) returns to the shell instead of ending the job, wiping the
+--- buffer, and collapsing a triple/work layout to fewer panes.
 ---
 --- When `cmd` is set, `b:logarktos_term_cmd` is written *before* termopen so
---- config-side TermOpen hooks (e.g. feeding Set-ExecutionPolicy into interactive
---- PowerShell) skip this buffer; we send policy (if needed) and then `cmd`
---- ourselves in order, so nothing lands in the AI CLI's stdin.
+--- any config-side TermOpen hooks can see the auto-start intent.
 --- @return integer terminal buffer
 local function open_term(win, cwd, cmd, opts)
 	opts = opts or {}
@@ -247,28 +247,14 @@ local function open_term(win, cwd, cmd, opts)
 	end
 	-- Shell is always the job (never termopen(cmd)): auto-start must not own
 	-- the terminal process, or the layout pane dies when the program exits.
-	vim.fn.termopen(vim.o.shell, term_opts)
+	-- List-form argv so Windows gets Bypass without a chansend race into stdin.
+	vim.fn.termopen(util.interactive_shell_argv(), term_opts)
 	if has_cmd then
 		-- Wait for the shell prompt, then feed the auto-start line as if typed.
 		vim.defer_fn(function()
 			if not vim.api.nvim_buf_is_valid(t_buf) then return end
 			local id = vim.b[t_buf].terminal_job_id
-			if not id then return end
-			local sh = (vim.o.shell or ""):lower()
-			local is_ps = sh:find("pwsh", 1, true) or sh:find("powershell", 1, true)
-			if is_ps then
-				-- Interactive PowerShell normally gets Bypass via a TermOpen hook;
-				-- we skipped that hook (logarktos_term_cmd), so apply it here
-				-- before launching the CLI so the session stays usable after exit.
-				vim.fn.chansend(id, "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass\r")
-				vim.defer_fn(function()
-					if not vim.api.nvim_buf_is_valid(t_buf) then return end
-					local jid = vim.b[t_buf].terminal_job_id
-					if jid then
-						vim.fn.chansend(jid, cmd .. "\r")
-					end
-				end, 80)
-			else
+			if id then
 				vim.fn.chansend(id, cmd .. "\r")
 			end
 		end, 80)

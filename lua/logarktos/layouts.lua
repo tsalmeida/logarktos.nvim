@@ -235,7 +235,12 @@ local function open_term(win, cwd, cmd, opts)
 	local t_buf = vim.api.nvim_create_buf(false, true)
 	vim.bo[t_buf].bufhidden = "wipe"
 	vim.api.nvim_win_set_buf(win, t_buf)
-	local term_opts = { cwd = cwd }
+	-- Must be a Vim dictionary. A bare Lua `{}` (or `{ cwd = nil }`) becomes an
+	-- empty *list* over the API bridge, and termopen fails with E475.
+	local term_opts = vim.empty_dict()
+	if cwd and cwd ~= "" then
+		term_opts.cwd = cwd
+	end
 	local has_cmd = cmd and cmd ~= ""
 	if has_cmd then
 		-- Mark before termopen so TermOpen autocmds see it (they fire mid-call).

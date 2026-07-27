@@ -39,7 +39,9 @@ function M.open_interactive_terminal(opts)
 	elseif opts.split then
 		vim.cmd("split")
 	end
-	local term_opts = {}
+	-- Must be a Vim dictionary. A bare Lua `{}` becomes an empty *list* over
+	-- the API bridge, and termopen then fails with E475 "expected dictionary".
+	local term_opts = vim.empty_dict()
 	if opts.cwd and opts.cwd ~= "" then
 		term_opts.cwd = opts.cwd
 	end

@@ -7,6 +7,7 @@
 --
 -- Example (user / nvim config root):
 --   return {
+--     tabname = "",  -- or e.g. "NVIM-Config" to pin the tab title for this folder
 --     start_dir = "C:/Logarktos/logarktos/",
 --     ignore_dirs = { ".git", "node_modules" },
 --     bufferfiles = { dir = "C:/…/bufferfiles/" },
@@ -132,6 +133,7 @@ end
 -- One-line explainers emitted above known keys when writing logarktos.lua.
 -- Keys are dotted paths from the root table (e.g. "organize.files").
 local KEY_COMMENTS = {
+	tabname = 'fixed tab title for this folder (e.g. "NVIM-Config"); empty/absent = automatic smart names',
 	organize = "per-folder :Organize settings",
 	["organize.ignore"] = 'basenames (files/folders) skipped by :Organize; add more as needed. Defaults: "documents", "logarktos.lua".',
 	["organize.fixed"] = 'folder names emptied into folders_bucket/<name> (no YYYYMMDD- prefix); originals stay empty in place for reuse.',
@@ -176,6 +178,7 @@ local function serialize_value(val, indent, path)
 
 	-- map: stable key order (known keys first, then alpha)
 	local priority = {
+		tabname = 0,
 		start_dir = 1,
 		ignore_dirs = 2,
 		bufferfiles = 3,
@@ -483,10 +486,26 @@ end
 
 -- ── :Logarktos — refresh missing standard sections ───────────────────────────
 
+--- Non-empty `tabname` from a folder's logarktos.lua, or nil when unset/empty.
+--- @param dir string|nil
+--- @return string|nil
+function M.get_tabname(dir)
+	if not dir or dir == "" then return nil end
+	local data = M.load_dir(dir)
+	if not data then return nil end
+	local name = data.tabname
+	if type(name) ~= "string" then return nil end
+	name = vim.trim(name)
+	if name == "" then return nil end
+	return name
+end
+
 --- The standard per-folder logarktos.lua shape (all known top-level categories
 --- and their nested keys). Used by :Logarktos to fill gaps without overwriting.
 function M.folder_template(base)
 	return {
+		-- Empty string = use automatic smart tab names; set to pin a fixed title.
+		tabname = "",
 		organize = M.default_organize(),
 		aimode = M.default_aimode(base),
 		work = M.default_work(base),

@@ -7,10 +7,14 @@
 --   layout  — arrangement-only labels (Triplicate, Large, Triple, Dual, …).
 --   note    — title typed into :NewMarkdown. Beats a layout label.
 --   folder  — :HereWork folder / directory basename. Sticks.
---   heading — a Markdown file's title/H1. The strongest clue.
---   manual  — explicit :TabRename. Always wins.
+--   heading — a Markdown file's title/H1. Strong automatic clue.
+--   manual  — explicit :TabRename.
+--   tabname — fixed name from the folder's logarktos.lua (`tabname = "…"`).
+--             Overrides every automatic mechanism (folder, heading, AI prefix,
+--             layout). Verbatim, never truncated. Empty/absent → normal rules.
 --
--- Inferred names are capped (config.tabs.max_title_chars); manual names verbatim.
+-- Inferred names are capped (config.tabs.max_title_chars); manual and
+-- logarktos.lua `tabname` values are kept verbatim.
 
 local config = require("logarktos.config")
 
@@ -23,6 +27,7 @@ M.PRIORITY = {
 	folder = 3,
 	heading = 4,
 	manual = 5,
+	tabname = 6, -- logarktos.lua fixed title; highest automatic tier
 }
 local P = M.PRIORITY
 
@@ -135,7 +140,7 @@ end
 --- Prefix the tab title with an AI CLI name: `codex-RunningWild`.
 --- The base (pre-prefix) title is preserved so later app switches only replace
 --- the prefix. Does nothing when `app` is empty/unknown or when the tab has a
---- manual name (manual always wins).
+--- manual name or a logarktos.lua `tabname` (those always win).
 function M.apply_ai_app(app, tab)
 	tab = get_tab(tab)
 	if not app or app == "" then return false end
@@ -143,7 +148,7 @@ function M.apply_ai_app(app, tab)
 	local envfile = require("logarktos.envfile")
 	if not envfile.AI_APPS[app] then return false end
 
-	-- Manual renames always win; leave them alone.
+	-- Manual renames and logarktos.lua `tabname` always win; leave them alone.
 	if M.get_priority(tab) >= P.manual then return false end
 
 	local base = M.get_base_name(tab) or M.get(tab)
@@ -189,6 +194,20 @@ end
 function M.apply_note(name) return M.apply(nil, name, P.note) end
 function M.apply_folder(name) return M.apply(nil, name, P.folder) end
 function M.apply_heading(name) return M.apply(nil, name, P.heading) end
+
+--- Apply a fixed tab title from the folder's logarktos.lua `tabname` field.
+--- Empty/absent → no-op (false). Value is set verbatim (no truncation) at the
+--- highest automatic priority so folder/heading/AI-prefix never replace it.
+--- @param dir string|nil  folder that owns logarktos.lua
+--- @param tab number|nil  tabpage (default: current)
+--- @return boolean applied
+function M.apply_from_rcfile(dir, tab)
+	tab = get_tab(tab)
+	local name = require("logarktos.rcfile").get_tabname(dir)
+	if not name then return false end
+	M.set(tab, name, { priority = P.tabname })
+	return true
+end
 
 -- ── name generators ─────────────────────────────────────────────────────────
 local function basename(dir)
@@ -299,6 +318,8 @@ end
 function M.auto_name(tab, opts)
 	tab = get_tab(tab)
 	opts = opts or {}
+	-- Fixed name from logarktos.lua wins over every inferred rule.
+	if M.apply_from_rcfile(opts.dir, tab) then return true end
 	local name = M.suggest_name(opts)
 	if not name or name == "" then return false end
 	local priority = opts.priority or (opts.layout and P.layout or P.folder)

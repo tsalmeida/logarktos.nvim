@@ -40,6 +40,18 @@ end
 
 --- Name a freshly-built layout tab from its focus buffer.
 local function name_layout_tab(buf, layout_opts)
+	layout_opts = layout_opts or {}
+	-- Resolve the folder whose logarktos.lua may pin a fixed `tabname`.
+	local dir = layout_opts.dir
+	if (not dir or dir == "") and buf and vim.api.nvim_buf_is_valid(buf) then
+		if vim.bo[buf].filetype == "oil" then
+			dir = util.oil_dir(buf)
+		else
+			dir = util.resolve_cwd(buf)
+		end
+	end
+	if tabs.apply_from_rcfile(dir) then return end
+
 	if buf and vim.api.nvim_buf_is_valid(buf) then
 		local md = tabs.md_title_for_buf(buf)
 		if md then
@@ -452,13 +464,17 @@ end
 function M.here_work_mode()
 	local info = build_work_layout({ new_tab = false })
 	-- HereWork transforms the current tab in place, so it must (re)name it from
-	-- the buffer we started on. Prefer the git-aware project-root name (so a deep
-	-- file or an Oil listing inside RunningWild/ names the tab "RunningWild"),
-	-- falling back to the plain folder name when we're not inside a project.
-	local folder = util.project_or_dir_name(info.cwd or vim.fn.getcwd())
-	if folder and folder ~= "" then tabs.apply_folder(folder) end
-	local app = info.top_app or info.bot_app
-	if app then tabs.apply_ai_app(app) end
+	-- the buffer we started on. logarktos.lua `tabname` wins when set; else
+	-- prefer the git-aware project-root name (so a deep file or an Oil listing
+	-- inside RunningWild/ names the tab "RunningWild"), falling back to the
+	-- plain folder name when we're not inside a project.
+	local cwd = info.cwd or vim.fn.getcwd()
+	if not tabs.apply_from_rcfile(cwd) then
+		local folder = util.project_or_dir_name(cwd)
+		if folder and folder ~= "" then tabs.apply_folder(folder) end
+		local app = info.top_app or info.bot_app
+		if app then tabs.apply_ai_app(app) end
+	end
 	announce_layout_built()
 end
 
@@ -629,12 +645,14 @@ function M.ai_mode_tab()
 	vim.api.nvim_win_set_width(left, wide)
 	vim.api.nvim_win_set_width(mid, wide)
 
-	-- Name the tab the same git-aware way HereWork does: the project-root folder
-	-- name when the PWD is inside a project, else the plain folder name.
-	local folder = util.project_or_dir_name(base)
-	if folder and folder ~= "" then tabs.apply_folder(folder) end
-	-- If logarktos.lua auto-started an AI CLI, prefix immediately: codex-Title.
-	if left_spec.app then tabs.apply_ai_app(left_spec.app) end
+	-- Name the tab: logarktos.lua `tabname` overrides everything when set;
+	-- else the same git-aware folder name HereWork uses, optionally prefixed
+	-- with an auto-started AI CLI (codex-Title).
+	if not tabs.apply_from_rcfile(base) then
+		local folder = util.project_or_dir_name(base)
+		if folder and folder ~= "" then tabs.apply_folder(folder) end
+		if left_spec.app then tabs.apply_ai_app(left_spec.app) end
+	end
 
 	-- Land in the terminal, ready to type. Deferred so the layout has settled
 	-- before we enter Terminal-Job (insert) mode.

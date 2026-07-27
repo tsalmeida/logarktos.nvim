@@ -133,16 +133,22 @@ Legacy `logarktos.env` (`left:…` lines) is still read and converted when no
 ### Smart tab names
 
 Every layout names its tab from the buffer it centres on. Names carry a
-*meaningfulness tier* (`layout < note < folder < heading < manual`) so the best
-clue wins and sticks, while arrangement-only labels stay disposable. Inferred
-names are capped (default 12 chars); `:LogarktosTabRename` sets a manual name
-that always wins. An optional tabline renderer (`tabs.tabline = true`) shows the
-names with a ● for meaningful ones.
+*meaningfulness tier*
+(`layout < note < folder < heading < manual < tabname`) so the best clue wins
+and sticks, while arrangement-only labels stay disposable. Inferred names are
+capped (default 12 chars); `:LogarktosTabRename` sets a manual name. An
+optional tabline renderer (`tabs.tabline = true`) shows the names with a ● for
+meaningful ones.
+
+**Fixed name from `logarktos.lua`:** set `tabname = "NVIM-Config"` (any non-empty
+string) in a folder's `logarktos.lua` to pin that exact tab title whenever a
+layout opens on that folder. It overrides folder names, Markdown headings, and
+AI CLI prefixes. Leave it empty or omit it to keep the automatic rules.
 
 **AIMode / Work terminals:** when an AI CLI is running in a watched terminal
 (`codex`, `grok`, `claude`, `agy`, …) — either auto-started from
 `logarktos.lua` or launched by hand — the tab title becomes `codex-<title>`
-(app name + the existing folder/title name).
+(app name + the existing folder/title name). Skipped when `tabname` is set.
 
 ### Timestamped notes
 
@@ -165,8 +171,9 @@ that Oil directory's `archive/` folder.
 
 - `:Logarktos` — refresh the current folder's `logarktos.lua` (Oil dir, then
   buffer dir, then cwd). Keeps every key already defined; adds any standard
-  categories/keys that are still missing (`organize`, `aimode`, `work`, and
-  nested defaults such as `organize.fixed`). Creates the file when absent.
+  categories/keys that are still missing (`tabname`, `organize`, `aimode`,
+  `work`, and nested defaults such as `organize.fixed`). Creates the file when
+  absent.
 
 ### Organize
 

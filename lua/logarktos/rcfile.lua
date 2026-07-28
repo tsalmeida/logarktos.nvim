@@ -15,8 +15,8 @@
 --     bookmarks = { "C:/path/to/file" },
 --     aimode = {
 --       left = { path = ".", cmd = "" },  -- type a CLI into cmd when you want one
---       center = { path = "." },
---       right = { path = "." },
+--       center = { path = ".", focus = "" },  -- focus = Oil entry name to land on
+--       right = { path = ".", focus = "" },
 --     },
 --     work = {
 --       right = {
@@ -191,9 +191,10 @@ local function serialize_value(val, indent, path)
 		center = 21,
 		right = 22,
 		path = 30,
-		cmd = 31,
-		cwd = 32,
-		dir = 33,
+		focus = 31,
+		cmd = 32,
+		cwd = 33,
+		dir = 34,
 		model = 40,
 		max_input_chars = 41,
 		default_instruction = 42,
@@ -600,9 +601,19 @@ end
 
 -- ── layout section ensure (AIMode / Work) ────────────────────────────────────
 
+--- Optional Oil-entry focus string from a pane table (empty/absent → nil).
+local function pane_focus(pane)
+	if type(pane) ~= "table" then return nil end
+	local focus = pane.focus
+	if type(focus) ~= "string" then return nil end
+	focus = vim.trim(focus)
+	if focus == "" then return nil end
+	return focus
+end
+
 local function pane_spec(pane, base)
 	if type(pane) ~= "table" then
-		return { cwd = base, path = nil, cmd = nil, app = nil }
+		return { cwd = base, path = nil, cmd = nil, app = nil, focus = nil }
 	end
 	local path = pane.path or pane.cwd
 	local abs = path and M.resolve_path(path, base) or base
@@ -614,19 +625,23 @@ local function pane_spec(pane, base)
 		path = abs,
 		cmd = cmd,
 		app = pane.app or M.ai_app_name(cmd),
+		-- Only meaningful for Oil panes (AIMode center/right, Work left, …).
+		focus = pane_focus(pane),
 	}
 end
 
 --- Defaults AIMode would use with no config (relative form for storage).
 --- Plain only: interactive terminal (empty cmd ready to fill) + Oil on the
 --- layout folder for both columns. No frontend/sdl or prompts heuristics —
---- set paths / cmd by hand in logarktos.lua when you want them.
+--- set paths / cmd / focus by hand in logarktos.lua when you want them.
+--- `focus` is the basename of a file or folder in that Oil listing to land on
+--- (empty = Oil's default cursor, usually `../`).
 function M.default_aimode(_base)
 	return {
 		-- Terminal: keep `cmd = ""` so a CLI is one edit away (e.g. "grok --yolo").
 		left = { path = ".", cmd = "" },
-		center = { path = "." },
-		right = { path = "." },
+		center = { path = ".", focus = "" },
+		right = { path = ".", focus = "" },
 	}
 end
 
@@ -642,6 +657,8 @@ function M.default_work(_base)
 end
 
 --- Ensure `aimode` exists in the folder's logarktos.lua; create/update file.
+--- Fills any newly introduced nested keys (e.g. `focus` on Oil panes) without
+--- overwriting existing values — same idea as :Logarktos / deep_fill_missing.
 --- @return table resolved { left, center, right } with absolute paths/cmds
 function M.ensure_aimode(base)
 	base = util.normalize(base or vim.fn.getcwd())
@@ -649,15 +666,21 @@ function M.ensure_aimode(base)
 	local path = M.path_in(base)
 	local file_missing = path and not util.exists(path)
 	local section_missing = type(data.aimode) ~= "table" or not next(data.aimode)
+	local filled = false
 	if section_missing then
 		data.aimode = M.default_aimode(base)
+	else
+		local added = deep_fill_missing(data.aimode, M.default_aimode(base))
+		filled = #added > 0
 	end
 	seed_organize_if_new_file(data, file_missing)
-	if section_missing or file_missing or data._from_legacy then
+	if section_missing or file_missing or data._from_legacy or filled then
 		M.save_dir(base, data)
 		data._from_legacy = nil
 		if section_missing then
 			util.notify("Wrote aimode section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+		elseif filled then
+			util.notify("Updated aimode section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
 		elseif file_missing then
 			util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
 		end
@@ -672,21 +695,33 @@ function M.ensure_aimode(base)
 end
 
 --- Ensure `work` exists; return resolved left + right terminal specs.
+--- When `work.left` is an Oil pane table, seed a missing `focus = ""` key.
 function M.ensure_work(base)
 	base = util.normalize(base or vim.fn.getcwd())
 	local data = M.load_or_empty(base)
 	local path = M.path_in(base)
 	local file_missing = path and not util.exists(path)
 	local section_missing = type(data.work) ~= "table" or not next(data.work)
+	local filled = false
 	if section_missing then
 		data.work = M.default_work(base)
+	else
+		local added = deep_fill_missing(data.work, M.default_work(base))
+		filled = #added > 0
+		-- Optional left Oil pane is not in the default template; still seed focus.
+		if type(data.work.left) == "table" and data.work.left.focus == nil then
+			data.work.left.focus = ""
+			filled = true
+		end
 	end
 	seed_organize_if_new_file(data, file_missing)
-	if section_missing or file_missing or data._from_legacy then
+	if section_missing or file_missing or data._from_legacy or filled then
 		M.save_dir(base, data)
 		data._from_legacy = nil
 		if section_missing then
 			util.notify("Wrote work section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+		elseif filled then
+			util.notify("Updated work section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
 		elseif file_missing then
 			util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
 		end
@@ -703,8 +738,8 @@ function M.ensure_work(base)
 		top = pane_spec(right_entries, base)
 		bot = pane_spec(right_entries, base)
 	else
-		top = { cwd = base, cmd = nil, app = nil }
-		bot = { cwd = base, cmd = nil, app = nil }
+		top = { cwd = base, cmd = nil, app = nil, focus = nil }
+		bot = { cwd = base, cmd = nil, app = nil, focus = nil }
 	end
 	return {
 		left = left,

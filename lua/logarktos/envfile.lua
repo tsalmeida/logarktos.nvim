@@ -43,7 +43,16 @@ local function entries_from_pane(pane, base)
 	if type(pane) ~= "table" then return out end
 	if pane.path or pane.cwd then
 		local abs = rcfile.resolve_path(pane.path or pane.cwd, base)
-		if abs then out[#out + 1] = { kind = "path", path = abs } end
+		if abs then
+			local focus = pane.focus
+			if type(focus) == "string" then
+				focus = vim.trim(focus)
+				if focus == "" then focus = nil end
+			else
+				focus = nil
+			end
+			out[#out + 1] = { kind = "path", path = abs, focus = focus }
+		end
 	end
 	if pane.cmd and pane.cmd ~= "" then
 		out[#out + 1] = { kind = "cmd", cmd = pane.cmd, app = M.ai_app_name(pane.cmd) }
@@ -90,6 +99,17 @@ function M.first_path(entries)
 	if not entries then return nil end
 	for _, e in ipairs(entries) do
 		if e.kind == "path" and e.path then return e.path end
+	end
+	return nil
+end
+
+--- Optional Oil-entry focus for the first path entry in a pane list.
+function M.first_focus(entries)
+	if not entries then return nil end
+	for _, e in ipairs(entries) do
+		if e.kind == "path" and e.focus and e.focus ~= "" then
+			return e.focus
+		end
 	end
 	return nil
 end

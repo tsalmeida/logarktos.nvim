@@ -215,11 +215,116 @@ function M.oil_cursor_entry()
 	return nil
 end
 
+--- Place the Oil cursor on the entry named `name` in `win` (current win if nil).
+--- Matches files and folders in the open listing; on Windows the match is
+--- case-insensitive. Returns true when the cursor moved.
+--- @param name string basename (or trailing-slash folder name) in the listing
+--- @param win? integer
+--- @return boolean
+function M.oil_focus_entry(name, win)
+	if not name or name == "" then return false end
+	-- Listing entries are basenames; strip a trailing slash and any path prefix
+	-- so `focus = "BuildAndRun.bat"` and `focus = "subdir/"` both work.
+	name = tostring(name):gsub("[\\/]+$", "")
+	if name == "" then return false end
+	if name:find("[\\/]") then
+		name = vim.fs.basename(name) or name
+	end
+	if name == "" then return false end
+
+	win = win or vim.api.nvim_get_current_win()
+	if not vim.api.nvim_win_is_valid(win) then return false end
+	local buf = vim.api.nvim_win_get_buf(win)
+	if not vim.api.nvim_buf_is_valid(buf) then return false end
+	if vim.bo[buf].filetype ~= "oil" then return false end
+
+	local oil = M.oil()
+	if not oil or not oil.get_entry_on_line then return false end
+
+	local want = name
+	local want_cmp = M.is_windows and want:lower() or want
+	local n = vim.api.nvim_buf_line_count(buf)
+	for lnum = 1, n do
+		local ok, entry = pcall(oil.get_entry_on_line, buf, lnum)
+		if ok and entry and type(entry.name) == "string" and entry.name ~= "" then
+			local ename = entry.name:gsub("[\\/]+$", "")
+			local ename_cmp = M.is_windows and ename:lower() or ename
+			if ename_cmp == want_cmp then
+				local line = vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1] or ""
+				-- Prefer the column of the entry name (after icons / id columns).
+				local col = line:find(entry.name, 1, true)
+					or line:find(ename, 1, true)
+					or 1
+				pcall(vim.api.nvim_win_set_cursor, win, { lnum, math.max(col - 1, 0) })
+				return true
+			end
+		end
+	end
+	return false
+end
+
 --- Open `dir` in Oil when available, otherwise :edit it.
-function M.open_dir(dir)
+--- Optional second arg: a focus name (string) or `{ focus = "file-or-folder" }`.
+--- When `focus` is set, the Oil listing lands the cursor on that entry after
+--- the directory finishes loading (see logarktos.lua pane `focus`).
+--- @param dir string
+--- @param opts? string|{ focus?: string }
+function M.open_dir(dir, opts)
+	local focus
+	if type(opts) == "string" then
+		focus = opts
+	elseif type(opts) == "table" then
+		focus = opts.focus
+	end
+	if type(focus) == "string" then
+		focus = vim.trim(focus)
+		if focus == "" then focus = nil end
+	else
+		focus = nil
+	end
+
+	-- Capture the window *before* Oil steals focus or another pane opens.
+	local win = vim.api.nvim_get_current_win()
+
+	local function apply_focus()
+		if not focus then return end
+		if not vim.api.nvim_win_is_valid(win) then return end
+		-- Retry a few times: Oil's listing is async and can repaint after the
+		-- first "ready" callback, which would otherwise leave the cursor on ../.
+		local attempts = 0
+		local function try()
+			attempts = attempts + 1
+			if not vim.api.nvim_win_is_valid(win) then return end
+			if M.oil_focus_entry(focus, win) then return end
+			if attempts < 6 then
+				vim.defer_fn(try, 40 * attempts)
+			end
+		end
+		try()
+	end
+
+	local oil = M.oil()
+	if oil and type(oil.open) == "function" then
+		-- Prefer the API so we get a true "buffer ready" callback.
+		local ok = pcall(oil.open, dir, nil, apply_focus)
+		if ok then
+			-- Oil can short-circuit (same buffer already open) without calling cb;
+			-- a scheduled pass still lands focus when the listing is already ready.
+			if focus then vim.schedule(apply_focus) end
+			return
+		end
+	end
 	if M.has_oil() then
 		local ok = pcall(vim.cmd, "Oil " .. vim.fn.fnameescape(dir))
-		if ok then return end
+		if ok then
+			local ok_u, oil_util = pcall(require, "oil.util")
+			if ok_u and oil_util.run_after_load then
+				pcall(oil_util.run_after_load, 0, apply_focus)
+			else
+				vim.schedule(apply_focus)
+			end
+			return
+		end
 	end
 	vim.cmd({ cmd = "edit", args = { dir } })
 end

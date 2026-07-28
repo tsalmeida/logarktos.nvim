@@ -101,12 +101,12 @@ Two scopes share the same filename and Lua table format:
    user file when you run those layouts from the Neovim config folder.
 
 ```lua
--- What the plugin seeds on first use (plain defaults; cmd ready to fill):
+-- What the plugin seeds on first use (plain defaults; cmd / focus ready to fill):
 return {
   aimode = {
-    left = { path = ".", cmd = "" },  -- put e.g. "grok --yolo" in cmd
-    center = { path = "." },          -- Oil at the layout folder
-    right = { path = "." },
+    left = { path = ".", cmd = "" },           -- put e.g. "grok --yolo" in cmd
+    center = { path = ".", focus = "" },       -- Oil at the layout folder
+    right = { path = ".", focus = "" },
   },
   work = {
     right = {
@@ -116,6 +116,22 @@ return {
   },
 }
 ```
+
+**Oil `focus`:** on any Oil pane (`aimode.center` / `aimode.right`, optional
+`work.left`, or Triple/Dual/Large path overrides), set `focus` to the
+**basename** of a file or folder in that listing so the cursor lands on it
+when the layout opens. Example:
+
+```lua
+right = {
+  path = "frontend/sdl",
+  focus = "BuildAndRun.bat",
+},
+```
+
+Empty or omitted `focus` leaves Oil's default cursor (usually `../`).
+`:Logarktos` / first AIMode run seeds missing `focus = ""` keys without
+overwriting values you already set.
 
 Non-empty `cmd` values are typed into an interactive shell (the shell remains
 the terminal job). Exiting the program (`/exit` in an AI CLI, etc.) returns

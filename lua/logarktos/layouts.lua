@@ -423,7 +423,7 @@ local function build_work_layout(opts)
 	-- Optional left path: open Oil there instead of the source buffer.
 	if work.left and work.left.path then
 		vim.api.nvim_set_current_win(left_win)
-		util.open_dir(work.left.path)
+		util.open_dir(work.left.path, { focus = work.left.focus })
 	end
 
 	vim.cmd("rightbelow vsplit")
@@ -480,9 +480,10 @@ end
 
 --- Open `dir` in Oil in the current window; else the focus path of `buf`
 --- (bookmark/recent selection), or keep `buf` when it is real content.
-local function open_pane_dir_or_buf(dir, buf, view)
+--- `focus` is an optional Oil entry name (logarktos.lua pane `focus`).
+local function open_pane_dir_or_buf(dir, buf, view, focus)
 	if dir then
-		util.open_dir(dir)
+		util.open_dir(dir, { focus = focus })
 		return
 	end
 	util.open_focus_or_buf(buf, view)
@@ -496,19 +497,22 @@ function M.triple_mode_tab()
 	local left_dir = env and envfile.first_path(env.left) or nil
 	local center_dir = env and envfile.first_path(env.center) or nil
 	local right_dir = env and envfile.first_path(env.right) or nil
+	local left_focus = env and envfile.first_focus(env.left) or nil
+	local center_focus = env and envfile.first_focus(env.center) or nil
+	local right_focus = env and envfile.first_focus(env.right) or nil
 	local view = vim.fn.winsaveview()
 	vim.cmd("tabnew")
 	local mid = vim.api.nvim_get_current_win()
-	open_pane_dir_or_buf(center_dir, buf, view)
+	open_pane_dir_or_buf(center_dir, buf, view, center_focus)
 	if cwd then
 		pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd))
 		vim.t.pwd_mode = "local"
 	end
 	vim.cmd("leftabove vsplit")
-	open_pane_dir_or_buf(left_dir, buf, view)
+	open_pane_dir_or_buf(left_dir, buf, view, left_focus)
 	vim.api.nvim_set_current_win(mid)
 	vim.cmd("rightbelow vsplit")
-	open_pane_dir_or_buf(right_dir, buf, view)
+	open_pane_dir_or_buf(right_dir, buf, view, right_focus)
 	vim.api.nvim_set_current_win(mid)
 	vim.cmd("wincmd =")
 
@@ -523,16 +527,18 @@ function M.dual_mode_tab()
 	local env = load_env(base)
 	local left_dir = env and envfile.first_path(env.left) or nil
 	local right_dir = env and envfile.first_path(env.right) or nil
+	local left_focus = env and envfile.first_focus(env.left) or nil
+	local right_focus = env and envfile.first_focus(env.right) or nil
 	local view = vim.fn.winsaveview()
 	vim.cmd("tabnew")
 	local left = vim.api.nvim_get_current_win()
-	open_pane_dir_or_buf(left_dir, buf, view)
+	open_pane_dir_or_buf(left_dir, buf, view, left_focus)
 	if cwd then
 		pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd))
 		vim.t.pwd_mode = "local"
 	end
 	vim.cmd("rightbelow vsplit")
-	open_pane_dir_or_buf(right_dir, buf, view)
+	open_pane_dir_or_buf(right_dir, buf, view, right_focus)
 	vim.api.nvim_set_current_win(left)
 	vim.cmd("wincmd =")
 
@@ -550,6 +556,8 @@ function M.large_mode_tab()
 	-- that used to open Oil from aimode when the buffer was empty/unnamed.
 	local left_dir = env and envfile.first_path(env.left) or nil
 	local right_dir = env and envfile.first_path(env.right) or nil
+	local left_focus = env and envfile.first_focus(env.left) or nil
+	local right_focus = env and envfile.first_focus(env.right) or nil
 	local view = vim.fn.winsaveview()
 	vim.cmd("tabnew")
 	local mid = vim.api.nvim_get_current_win()
@@ -557,7 +565,7 @@ function M.large_mode_tab()
 	vim.cmd("leftabove vnew")
 	local left = vim.api.nvim_get_current_win()
 	if left_dir then
-		util.open_dir(left_dir)
+		util.open_dir(left_dir, { focus = left_focus })
 	else
 		vim.bo.bufhidden = "wipe"
 		vim.bo.swapfile = false
@@ -566,7 +574,7 @@ function M.large_mode_tab()
 	vim.cmd("rightbelow vnew")
 	local right = vim.api.nvim_get_current_win()
 	if right_dir then
-		util.open_dir(right_dir)
+		util.open_dir(right_dir, { focus = right_focus })
 	else
 		vim.bo.bufhidden = "wipe"
 		vim.bo.swapfile = false
@@ -586,17 +594,20 @@ function M.new_large_tab()
 	local left_dir = env and envfile.first_path(env.left) or nil
 	local center_dir = env and envfile.first_path(env.center) or nil
 	local right_dir = env and envfile.first_path(env.right) or nil
+	local left_focus = env and envfile.first_focus(env.left) or nil
+	local center_focus = env and envfile.first_focus(env.center) or nil
+	local right_focus = env and envfile.first_focus(env.right) or nil
 
 	vim.cmd("tabnew")
 	local mid = vim.api.nvim_get_current_win()
-	if center_dir then util.open_dir(center_dir) end
+	if center_dir then util.open_dir(center_dir, { focus = center_focus }) end
 	vim.cmd("leftabove vnew")
 	local left = vim.api.nvim_get_current_win()
-	if left_dir then util.open_dir(left_dir) end
+	if left_dir then util.open_dir(left_dir, { focus = left_focus }) end
 	vim.api.nvim_set_current_win(mid)
 	vim.cmd("rightbelow vnew")
 	local right = vim.api.nvim_get_current_win()
-	if right_dir then util.open_dir(right_dir) end
+	if right_dir then util.open_dir(right_dir, { focus = right_focus }) end
 	local q = math.floor(vim.o.columns * 0.25)
 	vim.api.nvim_win_set_width(left, q)
 	vim.api.nvim_win_set_width(right, q)
@@ -610,6 +621,7 @@ end
 --- Oil. Pane targets come from the folder's logarktos.lua `aimode` section;
 --- when that section is missing it is created as plain defaults (interactive
 --- terminal + Oil on the layout folder for both columns — no path heuristics).
+--- Oil panes honour optional `focus` (basename of a file/folder to land on).
 function M.ai_mode_tab()
 	local cwd = util.resolve_cwd(vim.api.nvim_get_current_buf())
 	local base = cwd or vim.fn.getcwd()
@@ -618,6 +630,8 @@ function M.ai_mode_tab()
 	local left_spec = am.left or { cwd = base, cmd = nil, app = nil }
 	local center_dir = (am.center and am.center.path) or base
 	local right_dir = (am.right and am.right.path) or base
+	local center_focus = am.center and am.center.focus or nil
+	local right_focus = am.right and am.right.focus or nil
 
 	vim.cmd("tabnew")
 	local mid = vim.api.nvim_get_current_win()
@@ -628,9 +642,9 @@ function M.ai_mode_tab()
 	local right = vim.api.nvim_get_current_win()
 
 	vim.api.nvim_set_current_win(mid)
-	util.open_dir(center_dir)
+	util.open_dir(center_dir, { focus = center_focus })
 	vim.api.nvim_set_current_win(right)
-	util.open_dir(right_dir)
+	util.open_dir(right_dir, { focus = right_focus })
 
 	ensure_ai_watch()
 	open_term(left, left_spec.cwd or base, left_spec.cmd, {

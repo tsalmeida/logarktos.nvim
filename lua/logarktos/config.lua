@@ -14,6 +14,7 @@ M.default_keymaps = {
 	ai_mode             = "<leader>am",
 	work                = "<leader>wm",
 	here_work           = "<leader>hw",
+	text_work           = "<leader>tw",
 	triple              = "<leader>tm",
 	dual                = "<leader>dm",
 	focus               = "<leader>fm",

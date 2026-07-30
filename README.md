@@ -73,6 +73,7 @@ Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env var
 | `:LogarktosFocus` | editor centred with empty side buffers |
 | `:LogarktosWork` / `:LogarktosHereWork` | editor plus two terminals (new tab / current tab) |
 | `:LogarktosAIMode` / `:AIMode` | terminal plus Oil columns (folder from Oil / bookmark under cursor / file dir) |
+| `:LogarktosTextWork` / `:TextWork` | dual views of one file (start/end cursors) plus Oil of its folder |
 | `:LogarktosTriple` / `:LogarktosDual` | synchronized views of the same buffer |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
 | `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |
@@ -91,14 +92,15 @@ Two scopes share the same filename and Lua table format:
    tell you where to put it.
 
 2. **Project files** — `logarktos.lua` in any folder you open a layout from  
-   Holds `aimode` / `work` pane targets. **`:AIMode` / `:LogarktosWork` /
-   `:LogarktosHereWork`** ensure the matching section exists: if the file or
-   section is missing, it is written from the **plain** first-run defaults
-   (interactive terminal with no auto-start command; Oil columns on the layout
-   folder; Work’s two right terminals also plain). No special folders
-   (`frontend/sdl/`, etc.) are guessed — add those paths yourself when you want
-   them. Later runs read the file. Sections can also be added into an existing
-   user file when you run those layouts from the Neovim config folder.
+   Holds `aimode` / `work` / `textwork` pane targets. **`:AIMode` /
+   `:LogarktosWork` / `:LogarktosHereWork` / `:TextWork`** ensure the matching
+   section exists: if the file or section is missing, it is written from the
+   **plain** first-run defaults (interactive terminal with no auto-start
+   command; Oil columns on the layout folder; Work’s two right terminals also
+   plain; TextWork’s right Oil focus empty = the dual-pane file). No special
+   folders (`frontend/sdl/`, etc.) are guessed — add those paths yourself when
+   you want them. Later runs read the file. Sections can also be added into an
+   existing user file when you run those layouts from the Neovim config folder.
 
 ```lua
 -- What the plugin seeds on first use (plain defaults; cmd / focus ready to fill):
@@ -114,13 +116,16 @@ return {
       { path = ".", cmd = "" },       -- bottom terminal
     },
   },
+  textwork = {
+    right = { focus = "" },           -- empty = land Oil on the dual-pane file
+  },
 }
 ```
 
 **Oil `focus`:** on any Oil pane (`aimode.center` / `aimode.right`, optional
-`work.left`, or Triple/Dual/Large path overrides), set `focus` to the
-**basename** of a file or folder in that listing so the cursor lands on it
-when the layout opens. Example:
+`work.left`, TextWork’s right column, or Triple/Dual/Large path overrides),
+set `focus` to the **basename** of a file or folder in that listing so the
+cursor lands on it when the layout opens. Example:
 
 ```lua
 right = {
@@ -129,9 +134,10 @@ right = {
 },
 ```
 
-Empty or omitted `focus` leaves Oil's default cursor (usually `../`).
-`:Logarktos` / first AIMode run seeds missing `focus = ""` keys without
-overwriting values you already set.
+Empty or omitted `focus` leaves Oil's default cursor (usually `../`) — except
+**TextWork**, where empty means the dual-pane file’s basename.
+`:Logarktos` / first AIMode or TextWork run seeds missing `focus = ""` keys
+without overwriting values you already set.
 
 Non-empty `cmd` values are typed into an interactive shell (the shell remains
 the terminal job). Exiting the program (`/exit` in an AI CLI, etc.) returns

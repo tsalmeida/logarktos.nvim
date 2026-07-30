@@ -1,7 +1,7 @@
 -- logarktos/rcfile.lua ── load / save `logarktos.lua` (user + per-folder)
 --
--- Per-folder files describe layout panes (aimode / work). The special file at
--- stdpath("config")/logarktos.lua also holds user preferences (start_dir,
+-- Per-folder files describe layout panes (aimode / work / textwork). The special
+-- file at stdpath("config")/logarktos.lua also holds user preferences (start_dir,
 -- bufferfiles, ignore_dirs, bookmarks, AI model/limits, …). API keys stay in
 -- the real environment / a gitignored `.env` — never in these Lua files.
 --
@@ -23,6 +23,9 @@
 --         { path = ".", cmd = "" },
 --         { path = ".", cmd = "" },
 --       },
+--     },
+--     textwork = {
+--       right = { focus = "" },  -- empty = the dual-pane file's basename in Oil
 --     },
 --   }
 
@@ -138,6 +141,8 @@ local KEY_COMMENTS = {
 	["organize.ignore"] = 'basenames (files/folders) skipped by :Organize; add more as needed. Defaults: "documents", "logarktos.lua".',
 	["organize.fixed"] = 'folder names emptied into folders_bucket/<name> (no YYYYMMDD- prefix); originals stay empty in place for reuse.',
 	["organize.files"] = '"timestamps" = files_bucket/<ts>/<ext>/… (default) | "extensions" = files_bucket/<ext>/… (no timestamp folder)',
+	textwork = "TextWork layout (space+tw): same file left+center, Oil of the file's folder on the right",
+	["textwork.right.focus"] = 'Oil entry to land on (basename); empty/absent = the file open in the left/center panes',
 }
 
 local function serialize_value(val, indent, path)
@@ -187,6 +192,7 @@ local function serialize_value(val, indent, path)
 		organize = 6,
 		aimode = 10,
 		work = 11,
+		textwork = 12,
 		left = 20,
 		center = 21,
 		right = 22,
@@ -510,6 +516,7 @@ function M.folder_template(base)
 		organize = M.default_organize(),
 		aimode = M.default_aimode(base),
 		work = M.default_work(base),
+		textwork = M.default_textwork(base),
 	}
 end
 
@@ -656,6 +663,16 @@ function M.default_work(_base)
 	}
 end
 
+--- Defaults for TextWork (space+tw): dual views of one file + Oil of its folder.
+--- `right.focus` empty → land Oil on the dual-pane file's basename.
+function M.default_textwork(_base)
+	return {
+		right = {
+			focus = "",
+		},
+	}
+end
+
 --- Ensure `aimode` exists in the folder's logarktos.lua; create/update file.
 --- Fills any newly introduced nested keys (e.g. `focus` on Oil panes) without
 --- overwriting existing values — same idea as :Logarktos / deep_fill_missing.
@@ -745,6 +762,42 @@ function M.ensure_work(base)
 		left = left,
 		top = top,
 		bot = bot,
+		data = data,
+	}
+end
+
+--- Ensure `textwork` exists; return resolved right-pane Oil focus.
+--- Empty / absent `right.focus` means "use the dual-pane file's basename".
+--- @return table { right_focus: string|nil, data: table }
+function M.ensure_textwork(base)
+	base = util.normalize(base or vim.fn.getcwd())
+	local data = M.load_or_empty(base)
+	local path = M.path_in(base)
+	local file_missing = path and not util.exists(path)
+	local section_missing = type(data.textwork) ~= "table" or not next(data.textwork)
+	local filled = false
+	if section_missing then
+		data.textwork = M.default_textwork(base)
+	else
+		local added = deep_fill_missing(data.textwork, M.default_textwork(base))
+		filled = #added > 0
+	end
+	seed_organize_if_new_file(data, file_missing)
+	if section_missing or file_missing or data._from_legacy or filled then
+		M.save_dir(base, data)
+		data._from_legacy = nil
+		if section_missing then
+			util.notify("Wrote textwork section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+		elseif filled then
+			util.notify("Updated textwork section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+		elseif file_missing then
+			util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
+		end
+	end
+	local tw = data.textwork
+	local right = type(tw.right) == "table" and tw.right or {}
+	return {
+		right_focus = pane_focus(right),
 		data = data,
 	}
 end

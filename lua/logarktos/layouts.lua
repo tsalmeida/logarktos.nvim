@@ -4,6 +4,8 @@
 --   • Large / NewLarge — a wide editor flanked by narrow scratch buffers.
 --   • Focus            — editor centred with empty side buffers.
 --   • Work / HereWork  — editor plus two terminals.
+--   • AIMode           — terminal + Oil columns (aimode section).
+--   • TextWork         — dual views of one file + Oil of its folder (textwork).
 --   • Triple / Dual    — synchronized views of the same buffer.
 -- Every layout names its new tab from its *focus buffer* (see logarktos.tabs).
 
@@ -679,6 +681,118 @@ function M.ai_mode_tab()
 
 	-- Queued after the focus schedule above (FIFO), so the spotlight refresh it
 	-- triggers reads the terminal as the active window, not the centre Oil pane.
+	announce_layout_built()
+end
+
+--- Resolve a concrete file path for TextWork: bookmark/recent selection, Oil
+--- entry under the cursor, or the current file buffer. Directories alone are
+--- not enough — the layout needs a dual-pane file.
+--- @param buf integer
+--- @return string|nil absolute path
+local function resolve_text_file(buf)
+	buf = buf or vim.api.nvim_get_current_buf()
+	if not buf or not vim.api.nvim_buf_is_valid(buf) then return nil end
+	local ft = vim.bo[buf].filetype
+
+	if util.is_list_panel(buf) then
+		local path = util.resolve_focus_path(buf)
+		if path and path ~= "" and not util.is_dir(path) then
+			return util.normalize(path)
+		end
+		return nil
+	end
+
+	if ft == "oil" then
+		local oil = util.oil()
+		if not oil then return nil end
+		local ok, entry = pcall(oil.get_cursor_entry)
+		if ok and entry and entry.type == "file" and type(entry.name) == "string" and entry.name ~= "" then
+			local dir = util.oil_dir(buf)
+			if dir and dir ~= "" then
+				return util.normalize(util.join(dir, entry.name))
+			end
+		end
+		return nil
+	end
+
+	local path = vim.api.nvim_buf_get_name(buf)
+	if path ~= "" and (vim.bo[buf].buftype == "" or vim.bo[buf].buftype == "acwrite") then
+		if not util.is_dir(path) then
+			return util.normalize(vim.fn.fnamemodify(path, ":p"))
+		end
+	end
+	return nil
+end
+
+--- TextWork: three columns sized like AI Mode (left + centre wide, right
+--- narrower). Left and centre show the same file (left at first line / first
+--- char; centre at last line / first char, and focus lands there). Right is
+--- Oil on the file's parent folder, cursor on that file by default.
+---
+--- Uses / seeds the folder's logarktos.lua `textwork` section. Only
+--- `textwork.right.focus` is meaningful so far (empty = the dual-pane file's
+--- basename). Folder-level `tabname` still pins the tab title when set.
+function M.text_work_mode_tab()
+	local source_buf = vim.api.nvim_get_current_buf()
+	local file = resolve_text_file(source_buf)
+	if not file or file == "" then
+		util.notify(
+			"TextWork needs a file (open a file, select a file bookmark, or put the Oil cursor on a file)",
+			vim.log.levels.WARN,
+			"TextWork"
+		)
+		return
+	end
+
+	local abs = util.normalize(vim.fn.fnamemodify(file, ":p"))
+	local parent = vim.fn.fnamemodify(abs, ":h")
+	local basename = vim.fn.fnamemodify(abs, ":t")
+	local base = parent ~= "" and parent or (util.resolve_cwd(source_buf) or vim.fn.getcwd())
+	local tw = rcfile.ensure_textwork(base)
+	-- Explicit focus from logarktos.lua wins; otherwise land on the open file.
+	local oil_focus = tw.right_focus or basename
+
+	vim.cmd("tabnew")
+	local mid = vim.api.nvim_get_current_win()
+	-- Absolute path so per-window lcd cannot invent an empty buffer.
+	vim.cmd.edit(vim.fn.fnameescape(abs))
+	local file_buf = vim.api.nvim_get_current_buf()
+
+	-- Left: same buffer, cursor at first character of the first line.
+	vim.cmd("leftabove vsplit")
+	local left = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(left, file_buf)
+	pcall(vim.api.nvim_win_set_cursor, left, { 1, 0 })
+
+	-- Right: Oil of the file's folder, focused on the file (or logarktos override).
+	vim.api.nvim_set_current_win(mid)
+	vim.cmd("rightbelow vsplit")
+	local right = vim.api.nvim_get_current_win()
+	util.open_dir(parent, { focus = oil_focus })
+
+	-- Same column widths as AI Mode: left + centre share a wide third; right is narrower.
+	local wide = math.floor(vim.o.columns / 3) + 10
+	if vim.api.nvim_win_is_valid(left) then
+		vim.api.nvim_win_set_width(left, wide)
+	end
+	if vim.api.nvim_win_is_valid(mid) then
+		vim.api.nvim_win_set_width(mid, wide)
+	end
+
+	-- Land in the centre pane, first character of the last line.
+	local function focus_center_end()
+		if not vim.api.nvim_win_is_valid(mid) then return end
+		if not vim.api.nvim_buf_is_valid(file_buf) then return end
+		vim.api.nvim_set_current_win(mid)
+		local n = vim.api.nvim_buf_line_count(file_buf)
+		if n < 1 then n = 1 end
+		pcall(vim.api.nvim_win_set_cursor, mid, { n, 0 })
+	end
+	focus_center_end()
+	-- Oil focus is async; re-assert centre after the layout settles.
+	vim.schedule(focus_center_end)
+
+	name_layout_tab(file_buf, { layout = "text_work", dir = base })
 	announce_layout_built()
 end
 

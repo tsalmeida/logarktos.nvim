@@ -264,6 +264,7 @@ function M.name_for_layout(kind)
 	local map = {
 		triplicate = "Triplicate",
 		work = "Work",
+		text_work = "TextWork",
 		focus = "Focus",
 		large = "Large",
 		dual = "Dual",

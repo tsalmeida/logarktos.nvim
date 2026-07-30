@@ -41,6 +41,7 @@ local function specs()
 		{ "AIMode", "AIMode", function() layouts().ai_mode_tab() end, { desc = "AI layout (terminal + prompts/Oil columns)" } },
 		{ "Work", nil, function() layouts().work_mode_tab() end, { desc = "Work layout (editor + 2 terminals)" } },
 		{ "HereWork", nil, function() layouts().here_work_mode() end, { desc = "Work layout in the current tab" } },
+		{ "TextWork", "TextWork", function() layouts().text_work_mode_tab() end, { desc = "TextWork layout (dual file views + Oil of file folder)" } },
 		{ "Triple", nil, function() layouts().triple_mode_tab() end, { desc = "Triple synced views" } },
 		{ "Dual", nil, function() layouts().dual_mode_tab() end, { desc = "Dual synced views" } },
 		{ "Focus", nil, function() layouts().focus_mode_tab() end, { desc = "Focus layout (centred editor)" } },

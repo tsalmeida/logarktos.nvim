@@ -30,6 +30,7 @@ local function actions()
 		ai_mode             = { "n", function() L().ai_mode_tab() end, "AI layout (terminal + prompts/Oil)" },
 		work                = { "n", function() L().work_mode_tab() end, "Work layout" },
 		here_work           = { "n", function() L().here_work_mode() end, "Here Work layout" },
+		text_work           = { "n", function() L().text_work_mode_tab() end, "TextWork layout (dual file + Oil)" },
 		triple              = { "n", function() L().triple_mode_tab() end, "Triple synced views" },
 		dual                = { "n", function() L().dual_mode_tab() end, "Dual synced views" },
 		focus               = { "n", function() L().focus_mode_tab() end, "Focus layout" },

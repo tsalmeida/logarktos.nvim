@@ -188,6 +188,9 @@ the behaviour is unchanged — in Oil you simply land on the new file.
 folder so the file disappears from the listing. From an Oil buffer it can also
 archive the current entry or a visual/ranged selection of Markdown files into
 that Oil directory's `archive/` folder.
+`:LogarktosMarkdownDrafts` is the same operation with a different destination:
+it files the current file — or the Oil entry / visual selection — into a
+`drafts/` subfolder, created if missing.
 
 ### logarktos.lua
 

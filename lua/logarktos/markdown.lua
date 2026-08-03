@@ -30,29 +30,33 @@ local function oil_line_range(opts)
 	return line, line
 end
 
-local function move_to_archive(path, archive_dir)
+-- Every "file it away" command (archive/, drafts/, …) is the same operation with
+-- a different destination folder and wording, so the machinery below is shared:
+-- a spec is { folder, cmd, verb } and `filed_markdown` builds the pair of public
+-- functions from it. Adding another destination is one more spec, not a copy.
+local function move_into(path, dest_dir)
 	local name = vim.fn.fnamemodify(path, ":t")
-	local dest = util.unique_path(util.join(archive_dir, name))
+	local dest = util.unique_path(util.join(dest_dir, name))
 	local ok, err = uv.fs_rename(path, dest)
 	if not ok then ok, err = os.rename(path, dest) end
 	return ok ~= nil and ok ~= false, dest, err
 end
 
-local function archive_oil_markdown(opts)
+local function file_oil_markdown(spec, opts)
 	local dir = util.oil_dir(0)
 	if not dir or dir == "" then
-		util.notify("Oil directory is unknown.", vim.log.levels.WARN, "MarkdownArchive")
+		util.notify("Oil directory is unknown.", vim.log.levels.WARN, spec.cmd)
 		return
 	end
 
-	if (util.basename(dir) or ""):lower() == "archive" then
-		util.notify("Already in an archive/ folder.", vim.log.levels.INFO, "MarkdownArchive")
+	if (util.basename(dir) or ""):lower() == spec.folder then
+		util.notify(("Already in a %s/ folder."):format(spec.folder), vim.log.levels.INFO, spec.cmd)
 		return
 	end
 
 	local oil = util.oil()
 	if not oil or not oil.get_entry_on_line then
-		util.notify("Oil entry API is unavailable.", vim.log.levels.ERROR, "MarkdownArchive")
+		util.notify("Oil entry API is unavailable.", vim.log.levels.ERROR, spec.cmd)
 		return
 	end
 
@@ -72,18 +76,18 @@ local function archive_oil_markdown(opts)
 	end
 
 	if #files == 0 then
-		util.notify("No Markdown files selected in Oil.", vim.log.levels.WARN, "MarkdownArchive")
+		util.notify("No Markdown files selected in Oil.", vim.log.levels.WARN, spec.cmd)
 		return
 	end
 
-	local archive_dir = util.join(dir, "archive")
-	if not util.ensure_dir(archive_dir) then return end
+	local dest_dir = util.join(dir, spec.folder)
+	if not util.ensure_dir(dest_dir) then return end
 
-	local archived, failed = {}, {}
+	local moved, failed = {}, {}
 	for _, path in ipairs(files) do
-		local ok, dest, err = move_to_archive(path, archive_dir)
+		local ok, dest, err = move_into(path, dest_dir)
 		if ok then
-			table.insert(archived, dest)
+			table.insert(moved, dest)
 		else
 			table.insert(failed, vim.fn.fnamemodify(path, ":t") .. ": " .. tostring(err or "unknown error"))
 		end
@@ -92,12 +96,16 @@ local function archive_oil_markdown(opts)
 	util.refresh_oil()
 	if #failed > 0 then
 		util.notify(
-			("Archived %d Markdown file(s); %d failed:\n%s"):format(#archived, #failed, table.concat(failed, "\n")),
+			("%s %d Markdown file(s); %d failed:\n%s"):format(spec.verb, #moved, #failed, table.concat(failed, "\n")),
 			vim.log.levels.WARN,
-			"MarkdownArchive"
+			spec.cmd
 		)
 	else
-		util.notify(("Archived %d Markdown file(s) to archive/"):format(#archived), vim.log.levels.INFO, "MarkdownArchive")
+		util.notify(
+			("%s %d Markdown file(s) to %s/"):format(spec.verb, #moved, spec.folder),
+			vim.log.levels.INFO,
+			spec.cmd
+		)
 	end
 end
 
@@ -239,19 +247,19 @@ function M.new_markdown(opts)
 	end)
 end
 
--- ── Markdown Archive ─────────────────────────────────────────────────────────
--- Move the current file unchanged into an `archive/` subfolder of its own dir.
-function M.markdown_archive(opts)
+-- ── Filing Markdown away (archive/, drafts/) ─────────────────────────────────
+-- Move the current file unchanged into a `<folder>/` subfolder of its own dir.
+local function file_markdown(spec, opts)
 	opts = opts or {}
 	local buf = vim.api.nvim_get_current_buf()
 	if vim.bo[buf].filetype == "oil" then
-		archive_oil_markdown(opts)
+		file_oil_markdown(spec, opts)
 		return
 	end
 
 	local current_path = vim.api.nvim_buf_get_name(buf)
 	if current_path == "" or not uv.fs_stat(current_path) then
-		util.notify("Buffer has no file on disk to archive.", vim.log.levels.WARN, "MarkdownArchive")
+		util.notify("Buffer has no file on disk to move.", vim.log.levels.WARN, spec.cmd)
 		return
 	end
 
@@ -260,25 +268,24 @@ function M.markdown_archive(opts)
 	end
 
 	local dir = vim.fn.fnamemodify(current_path, ":h")
-	local name = vim.fn.fnamemodify(current_path, ":t")
 
-	if vim.fs.basename(dir):lower() == "archive" then
-		util.notify("File is already in an archive/ folder.", vim.log.levels.INFO, "MarkdownArchive")
+	if vim.fs.basename(dir):lower() == spec.folder then
+		util.notify(("File is already in a %s/ folder."):format(spec.folder), vim.log.levels.INFO, spec.cmd)
 		return
 	end
 
-	local archive_dir = util.join(dir, "archive")
-	if not util.ensure_dir(archive_dir) then return end
+	local dest_dir = util.join(dir, spec.folder)
+	if not util.ensure_dir(dest_dir) then return end
 
-	local ok, dest, err = move_to_archive(current_path, archive_dir)
+	local ok, dest, err = move_into(current_path, dest_dir)
 	if not ok then
-		util.notify("Could not archive file: " .. tostring(err or "unknown error"), vim.log.levels.ERROR, "MarkdownArchive")
+		util.notify("Could not move file: " .. tostring(err or "unknown error"), vim.log.levels.ERROR, spec.cmd)
 		return
 	end
 
-	-- Land in the original folder via Oil so the archived file drops out of
-	-- view, rather than following the file into archive/. Drop any cached Oil
-	-- buffer for that folder first so the reopen reloads from disk: refreshing
+	-- Land in the original folder via Oil so the moved file drops out of
+	-- view, rather than following the file into the destination. Drop any cached
+	-- Oil buffer for that folder first so the reopen reloads from disk: refreshing
 	-- a reused hidden buffer in place races with Oil's async load and could
 	-- leave the moved file visible until a manual :e!. If the buffer is still
 	-- displayed (a split), we can't wipe it — fall back to an in-place refresh,
@@ -290,7 +297,20 @@ function M.markdown_archive(opts)
 	-- watch_for_changes is the reliable backstop -- it reloads the listing when
 	-- the file moves on disk, regardless of this refresh's timing.
 	if not wiped then util.refresh_oil() end
-	util.notify("Archived " .. util.relpath(dest, dir), vim.log.levels.INFO, "MarkdownArchive")
+	util.notify(spec.verb .. " " .. util.relpath(dest, dir), vim.log.levels.INFO, spec.cmd)
+end
+
+local ARCHIVE = { folder = "archive", cmd = "MarkdownArchive", verb = "Archived" }
+local DRAFTS = { folder = "drafts", cmd = "MarkdownDrafts", verb = "Drafted" }
+
+--- Move the current/selected Markdown file(s) into ./archive.
+function M.markdown_archive(opts)
+	file_markdown(ARCHIVE, opts)
+end
+
+--- Move the current/selected Markdown file(s) into ./drafts.
+function M.markdown_drafts(opts)
+	file_markdown(DRAFTS, opts)
 end
 
 return M

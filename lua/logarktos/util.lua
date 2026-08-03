@@ -31,6 +31,10 @@ function M.interactive_shell_argv()
 end
 
 --- Open an interactive shell in the current window (or after a split).
+--- Always installs a fresh buffer first: `termopen` requires an unmodified
+--- buffer, and a split of an existing terminal reuses that (always-modified)
+--- buffer — so space+ht on top of a terminal would fail with E5108 otherwise.
+--- The old buffer stays open in any other window still showing it.
 --- @param opts? { vsplit?: boolean, split?: boolean, cwd?: string, startinsert?: boolean }
 function M.open_interactive_terminal(opts)
 	opts = opts or {}
@@ -39,6 +43,11 @@ function M.open_interactive_terminal(opts)
 	elseif opts.split then
 		vim.cmd("split")
 	end
+	-- Same pattern as layouts.open_term: never call termopen on the current
+	-- buffer (terminal / named / modified all fail or hijack a file buffer).
+	local win = vim.api.nvim_get_current_win()
+	local fresh = vim.api.nvim_create_buf(true, false)
+	vim.api.nvim_win_set_buf(win, fresh)
 	-- Must be a Vim dictionary. A bare Lua `{}` becomes an empty *list* over
 	-- the API bridge, and termopen then fails with E475 "expected dictionary".
 	local term_opts = vim.empty_dict()

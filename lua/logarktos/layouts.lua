@@ -624,6 +624,8 @@ end
 --- when that section is missing it is created as plain defaults (interactive
 --- terminal + Oil on the layout folder for both columns — no path heuristics).
 --- Oil panes honour optional `focus` (basename of a file/folder to land on).
+--- Base folder: Oil directory entry under the cursor (or Oil listing / `../`),
+--- bookmark under the cursor, file buffer parent, else cwd.
 function M.ai_mode_tab()
 	local cwd = util.resolve_cwd(vim.api.nvim_get_current_buf())
 	local base = cwd or vim.fn.getcwd()

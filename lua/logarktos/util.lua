@@ -403,7 +403,8 @@ function M.is_list_panel(buf)
 end
 
 --- Exact path under the cursor / focus of `buf`, or nil.
---- Bookmark list → selected entry; recent-files → selected entry; Oil → dir;
+--- Bookmark list → selected entry; recent-files → selected entry;
+--- Oil → directory entry under the cursor, else the Oil listing dir;
 --- normal file buffer → its path. List headers / empty rows return nil.
 function M.resolve_focus_path(buf)
 	buf = buf or vim.api.nvim_get_current_buf()
@@ -432,7 +433,7 @@ function M.resolve_focus_path(buf)
 	end
 
 	if ft == "oil" then
-		return M.oil_dir(buf)
+		return M.oil_selected_dir(buf) or M.oil_dir(buf)
 	end
 
 	local path = vim.api.nvim_buf_get_name(buf)
@@ -456,13 +457,46 @@ function M.open_path(path)
 	return false
 end
 
+--- When Oil's cursor is on a real directory entry (not `..`), return that
+--- folder's absolute path. Parent line, files, links-to-files, and empty
+--- cursor all return nil so callers can fall back to the listing directory.
+--- Mirrors bookmark-list selection: pick a folder to open layouts there;
+--- put the cursor on `../` to keep the folder Oil is already showing.
+--- @param buf? integer
+--- @return string|nil
+function M.oil_selected_dir(buf)
+	local dir = M.oil_dir(buf)
+	if not dir or dir == "" then return nil end
+
+	-- get_cursor_entry reads the *current window* cursor. Layout keymaps run
+	-- while the Oil window is still current; if `buf` is another Oil buffer,
+	-- only trust the cursor when that buffer is displayed in the current win.
+	local cur = vim.api.nvim_get_current_buf()
+	if buf and buf ~= cur then return nil end
+
+	local entry = M.oil_cursor_entry()
+	if not entry or type(entry.name) ~= "string" or entry.name == "" then return nil end
+	-- Oil marks the parent row as type "parent" (often named "..").
+	if entry.type == "parent" then return nil end
+
+	local selected = M.normalize(M.join(dir, entry.name))
+	if selected and selected ~= "" and M.is_dir(selected) then
+		return selected
+	end
+	return nil
+end
+
 --- Resolve a working directory from a buffer:
---- Oil dir → focus path (bookmark/recent/file) as dir → cwd.
+--- Oil selected folder (or Oil dir) → focus path (bookmark/recent/file) as dir → cwd.
 --- Layouts use this for terminals, lcd, and logarktos.lua base folder.
 function M.resolve_cwd(buf)
 	buf = buf or vim.api.nvim_get_current_buf()
 	local ft = vim.bo[buf].filetype
 	if ft == "oil" then
+		-- Folder under the cursor wins (same idea as space+bl bookmarks).
+		-- `../` or a file → the Oil listing directory itself.
+		local selected = M.oil_selected_dir(buf)
+		if selected then return selected end
 		local dir = M.oil_dir(buf)
 		if dir then return dir end
 	end

@@ -72,7 +72,7 @@ Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env var
 | `:LogarktosLarge` / `:LogarktosNewLarge` | wide editor flanked by narrow scratch buffers |
 | `:LogarktosFocus` | editor centred with empty side buffers |
 | `:LogarktosWork` / `:LogarktosHereWork` | editor plus two terminals (new tab / current tab) |
-| `:LogarktosAIMode` / `:AIMode` | terminal plus Oil columns (folder from Oil / bookmark under cursor / file dir) |
+| `:LogarktosAIMode` / `:AIMode` | terminal plus Oil columns (folder from Oil cursor / bookmark under cursor / file dir) |
 | `:LogarktosTextWork` / `:TextWork` | dual views of one file (start/end cursors) plus Oil of its folder |
 | `:LogarktosTriple` / `:LogarktosDual` | synchronized views of the same buffer |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |

@@ -7,15 +7,15 @@
 --
 -- Example (user / nvim config root):
 --   return {
---     tabname = "",  -- or e.g. "NVIM-Config" to pin the tab title for this folder
+--     tabname = "",  -- e.g. "NVIM-Config" to name tabs opened on this folder
 --     start_dir = "C:/Logarktos/logarktos/",
 --     ignore_dirs = { ".git", "node_modules" },
 --     bufferfiles = { dir = "C:/…/bufferfiles/" },
 --     ai = { model = "gpt-5-mini", max_input_chars = 1000, default_instruction = "…" },
 --     bookmarks = { "C:/path/to/file" },
 --     aimode = {
---       left = { path = ".", cmd = "" },  -- type a CLI into cmd when you want one
---       center = { path = ".", focus = "" },  -- focus = Oil entry name to land on
+--       left = { path = ".", cmd = "" },
+--       center = { path = ".", focus = "" },
 --       right = { path = ".", focus = "" },
 --     },
 --     work = {
@@ -25,7 +25,7 @@
 --       },
 --     },
 --     textwork = {
---       right = { focus = "" },  -- empty = the dual-pane file's basename in Oil
+--       right = { focus = "" },
 --     },
 --   }
 
@@ -133,16 +133,40 @@ local function quote_str(s)
 	return string.format("%q", s)
 end
 
--- One-line explainers emitted above known keys when writing logarktos.lua.
+-- One short sentence per known key, emitted above that field when writing.
 -- Keys are dotted paths from the root table (e.g. "organize.files").
 local KEY_COMMENTS = {
-	tabname = 'fixed tab title for this folder (e.g. "NVIM-Config"); empty/absent = automatic smart names',
-	organize = "per-folder :Organize settings",
-	["organize.ignore"] = 'basenames (files/folders) skipped by :Organize; add more as needed. Defaults: "documents", "logarktos.lua".',
-	["organize.fixed"] = 'folder names emptied into folders_bucket/<name> (no YYYYMMDD- prefix); originals stay empty in place for reuse.',
-	["organize.files"] = '"timestamps" = files_bucket/<ts>/<ext>/… (default) | "extensions" = files_bucket/<ext>/… (no timestamp folder)',
-	textwork = "TextWork layout (space+tw): same file left+center, Oil of the file's folder on the right",
-	["textwork.right.focus"] = 'Oil entry to land on (basename); empty/absent = the file open in the left/center panes',
+	-- Folder identity — the tab title for layouts opened on this folder.
+	tabname = 'Name for tabs opened on this folder (e.g. "NVIM-Config"). Empty = automatic.',
+	-- User-file prefs
+	start_dir = "Default folder for Triplicate (space+tr).",
+	ignore_dirs = "Folder basenames skipped by the recent-files panel.",
+	bufferfiles = "Autosaved scratch buffers (space+bu).",
+	["bufferfiles.dir"] = "Folder that stores bufferfiles.",
+	["bufferfiles.keep"] = "How many recent bufferfiles to keep.",
+	["bufferfiles.prefix"] = "Filename prefix for new bufferfiles.",
+	ai = "OpenAI helpers (space+ai / space+sf).",
+	["ai.enabled"] = "Master switch for AI commands.",
+	["ai.model"] = "OpenAI model name.",
+	["ai.max_input_chars"] = "Max characters sent to the model.",
+	["ai.default_instruction"] = "Default prompt prefix for space+ai.",
+	["ai.max_name_len"] = "Max length of AI-suggested filenames.",
+	["ai.api_key_env"] = "Env var name that holds the API key (never the key itself).",
+	bookmarks = "Paths shown in the bookmark list (space+bl).",
+	-- Organize
+	organize = "Settings for :Organize (space+or).",
+	["organize.ignore"] = "Basenames never moved by :Organize.",
+	["organize.fixed"] = "Folder names emptied into the folders bucket without a date prefix.",
+	["organize.files"] = '"timestamps" or "extensions" — how files are bucketed.',
+	-- Layouts
+	aimode = "AIMode (space+am): terminal left, Oil center, Oil right.",
+	work = "Work (space+wm / space+hw): editor + two terminals.",
+	textwork = "TextWork (space+tw): same file left+center, Oil right.",
+	["textwork.right.focus"] = "Oil entry to land on; empty = the dual-pane file.",
+	-- Pane fields (nested under aimode / work / textwork)
+	path = "Folder for this pane (relative to the layout folder, or absolute).",
+	cmd = "Command typed into the terminal; empty = plain shell.",
+	focus = "Oil entry basename to land on; empty = Oil default.",
 }
 
 local function serialize_value(val, indent, path)
@@ -511,7 +535,7 @@ end
 --- and their nested keys). Used by :Logarktos to fill gaps without overwriting.
 function M.folder_template(base)
 	return {
-		-- Empty string = use automatic smart tab names; set to pin a fixed title.
+		-- tabname: set this to pin layout tab titles for this folder.
 		tabname = "",
 		organize = M.default_organize(),
 		aimode = M.default_aimode(base),

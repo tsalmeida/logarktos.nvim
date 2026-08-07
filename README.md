@@ -162,10 +162,12 @@ capped (default 12 chars); `:LogarktosTabRename` sets a manual name. An
 optional tabline renderer (`tabs.tabline = true`) shows the names with a ● for
 meaningful ones.
 
-**Fixed name from `logarktos.lua`:** set `tabname = "NVIM-Config"` (any non-empty
-string) in a folder's `logarktos.lua` to pin that exact tab title whenever a
-layout opens on that folder. It overrides folder names, Markdown headings, and
-AI CLI prefixes. Leave it empty or omit it to keep the automatic rules.
+**Fixed name from `logarktos.lua`:** the `tabname` field (always first in the
+template) names tabs opened on that folder. Set `tabname = "NVIM-Config"` (any
+non-empty string) to pin that exact title whenever a layout opens there. It
+overrides folder names, Markdown headings, and AI CLI prefixes. Leave it empty
+or omit it to keep the automatic rules. Written files use one short comment
+line per known field.
 
 **AIMode / Work terminals:** when an AI CLI is running in a watched terminal
 (`codex`, `grok`, `claude`, `agy`, …) — either auto-started from
@@ -198,7 +200,9 @@ it files the current file — or the Oil entry / visual selection — into a
   buffer dir, then cwd). Keeps every key already defined; adds any standard
   categories/keys that are still missing (`tabname`, `organize`, `aimode`,
   `work`, and nested defaults such as `organize.fixed`). Creates the file when
-  absent.
+  absent. Each known field is written with one short comment line above it.
+- **Oil pin:** when a directory contains `logarktos.lua`, Oil lists it first
+  (immediately after `../`), via a sort-only column registered at setup.
 
 ### Organize
 

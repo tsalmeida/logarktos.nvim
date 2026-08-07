@@ -88,6 +88,10 @@ function M.setup(opts)
 	require("logarktos.commands").setup()
 	require("logarktos.keymaps").setup()
 
+	-- Pin logarktos.lua to the top of Oil listings (after ../). Soft-fails
+	-- when Oil/Canola is not installed.
+	require("logarktos.oil_pin").setup()
+
 	install_startup(cfg.startup)
 
 	did_setup = true

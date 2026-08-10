@@ -211,23 +211,53 @@ local function remove(path)
 	return removed
 end
 
-local function resolve_file_from_context()
+--- Path under the cursor / focus: Oil entry (file or folder), listing dir on
+--- `../`, netrw dir, or the current buffer's file. Second return is "file" or
+--- "folder" for notifications; third is an error string when path is nil.
+local function resolve_from_context()
 	local buf = vim.api.nvim_get_current_buf()
-	if vim.bo[buf].filetype == "oil" then
+	local ft = vim.bo[buf].filetype
+
+	if ft == "oil" then
 		local ok, oil = pcall(require, "oil")
-		if not ok then return nil, "Oil not available" end
-		local entry = oil.get_cursor_entry()
-		if not entry or not entry.name then return nil, "Oil: no entry under cursor" end
-		if entry.type ~= "file" then return nil, "Oil: cursor must be on a file" end
+		if not ok then return nil, nil, "Oil not available" end
 		local dir = oil.get_current_dir()
-		if not dir or dir == "" then return nil, "Oil: unknown dir" end
-		return vim.fs.normalize(vim.fs.joinpath(dir, entry.name))
+		if not dir or dir == "" then return nil, nil, "Oil: unknown dir" end
+		dir = vim.fs.normalize(dir)
+
+		local entry = oil.get_cursor_entry()
+		if entry and type(entry.name) == "string" and entry.name ~= "" then
+			-- Parent row (`../`): bookmark the folder Oil is already listing.
+			if entry.type == "parent" then
+				return dir, "folder", nil
+			end
+			local selected = vim.fs.normalize(vim.fs.joinpath(dir, entry.name))
+			if entry.type == "directory" or is_dir(selected) then
+				return selected, "folder", nil
+			end
+			-- Files and non-directory links: bookmark the entry itself.
+			return selected, "file", nil
+		end
+		-- No cursor entry: fall back to the listing directory.
+		return dir, "folder", nil
 	end
+
+	if ft == "netrw" then
+		local dir = vim.b.netrw_curdir
+		if dir and dir ~= "" then return vim.fs.normalize(dir), "folder", nil end
+		return nil, nil, "netrw: unknown dir"
+	end
+
 	local path = vim.api.nvim_buf_get_name(buf)
-	if path == "" then return nil, "Current buffer has no file name" end
-	return vim.fs.normalize(path)
+	if path == "" then return nil, nil, "Current buffer has no file name" end
+	path = vim.fs.normalize(path)
+	if is_dir(path) then return path, "folder", nil end
+	return path, "file", nil
 end
 
+--- Always the folder context: Oil listing dir, netrw dir, or parent of the
+--- current file. Kept for :LogarktosBookmarkAddDir and any callers that want
+--- the containing folder rather than the Oil entry under the cursor.
 local function resolve_dir_from_context()
 	local buf = vim.api.nvim_get_current_buf()
 	local ft = vim.bo[buf].filetype
@@ -246,33 +276,38 @@ local function resolve_dir_from_context()
 	return vim.fs.normalize(vim.fn.fnamemodify(path, ":p:h"))
 end
 
--- ── public actions ───────────────────────────────────────────────────────────
-function M.bookmark_add()
-	local path, err = resolve_file_from_context()
-	if not path then
-		vim.notify("Bookmark: " .. err, vim.log.levels.WARN)
-		return
-	end
+local function notify_add(path, kind)
 	local ok, why = add(path)
 	if ok then
-		vim.notify("Bookmarked file: " .. path, vim.log.levels.INFO, { title = "Bookmarks" })
+		local label = (kind == "folder") and "folder" or "file"
+		vim.notify("Bookmarked " .. label .. ": " .. path, vim.log.levels.INFO, { title = "Bookmarks" })
 	else
 		vim.notify("Bookmark: " .. why, vim.log.levels.WARN, { title = "Bookmarks" })
 	end
 end
 
+-- ── public actions ───────────────────────────────────────────────────────────
+--- Bookmark the current selection: Oil entry under the cursor (file or folder),
+--- `../` or empty → Oil listing dir, otherwise the current buffer's file.
+function M.bookmark_add()
+	local path, kind, err = resolve_from_context()
+	if not path then
+		vim.notify("Bookmark: " .. (err or "nothing to bookmark"), vim.log.levels.WARN)
+		return
+	end
+	notify_add(path, kind)
+end
+
+--- Bookmark the containing/current folder only (Oil listing, netrw, or parent
+--- of the open file). Prefer :LogarktosBookmarkAdd / space+bf for the entry
+--- under the cursor; this remains for explicit folder-of-context use.
 function M.bookmark_add_dir()
 	local path, err = resolve_dir_from_context()
 	if not path then
 		vim.notify("Bookmark: " .. err, vim.log.levels.WARN)
 		return
 	end
-	local ok, why = add(path)
-	if ok then
-		vim.notify("Bookmarked folder: " .. path, vim.log.levels.INFO, { title = "Bookmarks" })
-	else
-		vim.notify("Bookmark: " .. why, vim.log.levels.WARN, { title = "Bookmarks" })
-	end
+	notify_add(path, "folder")
 end
 
 function M.bookmark_del()
@@ -294,10 +329,9 @@ function M.bookmark_del()
 		return
 	end
 
-	local path, err = resolve_file_from_context()
-	if not path then path, err = resolve_dir_from_context() end
+	local path, _, err = resolve_from_context()
 	if not path then
-		vim.notify("Bookmark: " .. err, vim.log.levels.WARN)
+		vim.notify("Bookmark: " .. (err or "nothing under cursor"), vim.log.levels.WARN)
 		return
 	end
 	if remove(path) then
@@ -378,8 +412,8 @@ function render(buf, force)
 			"— No bookmarks yet —",
 			"",
 			"Tips:",
-			"  bookmark a file   → :LogarktosBookmarkAdd",
-			"  bookmark a folder → :LogarktosBookmarkAddDir",
+			"  bookmark file or folder → :LogarktosBookmarkAdd  (space+bf)",
+			"  in Oil: cursor on a file or folder; on ../ for the listing dir",
 		}
 		meta = {}
 	end

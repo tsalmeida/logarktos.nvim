@@ -234,8 +234,12 @@ it files the current file — or the Oil entry / visual selection — into a
 
 `:LogarktosBookmarks` opens an Oil-like list (folders first, then files, newest
 first). `<CR>` opens in Neovim, `<C-v>`/`<C-x>` split, `gx` opens with the
-operating system's default app, `dd` deletes, and `q` closes. Add the current/Oil
-file or folder with `:LogarktosBookmarkAdd` / `:LogarktosBookmarkAddDir`.
+operating system's default app, `dd` deletes, and `q` closes. Add a bookmark
+with `:LogarktosBookmarkAdd` (default keymap `<leader>bf`): in Oil it follows
+the entry under the cursor (file or folder; put the cursor on `../` for the
+listing directory), otherwise the current buffer's file. `:LogarktosBookmarkAddDir`
+still bookmarks the Oil listing directory or the parent of the open file if you
+want that explicitly (no default keymap).
 
 ### Working-directory mode
 

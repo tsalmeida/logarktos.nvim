@@ -53,8 +53,8 @@ local function specs()
 
 		-- bookmarks
 		{ "Bookmarks", nil, function() bookmarks().bookmark_list() end, { desc = "List bookmarks" } },
-		{ "BookmarkAdd", nil, function() bookmarks().bookmark_add() end, { desc = "Bookmark current/Oil file" } },
-		{ "BookmarkAddDir", nil, function() bookmarks().bookmark_add_dir() end, { desc = "Bookmark current/Oil folder" } },
+		{ "BookmarkAdd", nil, function() bookmarks().bookmark_add() end, { desc = "Bookmark Oil entry under cursor (file or folder), or current file" } },
+		{ "BookmarkAddDir", nil, function() bookmarks().bookmark_add_dir() end, { desc = "Bookmark Oil listing dir / parent of current file" } },
 		{ "BookmarkDelete", nil, function() bookmarks().bookmark_del() end, { desc = "Delete a bookmark" } },
 
 		-- markdown + organize

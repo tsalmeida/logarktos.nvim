@@ -67,9 +67,9 @@ local function actions()
 		-- bufferfiles
 		bufferfiles_open    = { "n", function() B().open_root() end, "Open bufferfiles" },
 
-		-- bookmarks
-		bookmark_add_file   = { { "n", "v" }, function() BM().bookmark_add() end, "Bookmark file" },
-		bookmark_add_dir    = { { "n", "v" }, function() BM().bookmark_add_dir() end, "Bookmark folder" },
+		-- bookmarks (add adapts: Oil file/folder under cursor, else buffer file)
+		bookmark_add_file   = { { "n", "v" }, function() BM().bookmark_add() end, "Bookmark file or folder" },
+		bookmark_add_dir    = { { "n", "v" }, function() BM().bookmark_add_dir() end, "Bookmark folder (listing/parent)" },
 		bookmark_delete     = { { "n", "v" }, function() BM().bookmark_del() end, "Delete bookmark" },
 		bookmark_list       = { "n", function() BM().bookmark_list() end, "List bookmarks" },
 

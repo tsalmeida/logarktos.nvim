@@ -36,9 +36,9 @@ M.default_keymaps = {
 	split_close         = "<leader>wq",
 	-- bufferfiles
 	bufferfiles_open    = "<leader>bu",
-	-- bookmarks
+	-- bookmarks (bf adapts to Oil selection: file or folder under cursor)
 	bookmark_add_file   = "<leader>bf",
-	bookmark_add_dir    = "<leader>bF",
+	bookmark_add_dir    = false, -- use space+bf; set e.g. "<leader>bF" to restore
 	bookmark_delete     = "<leader>bd",
 	bookmark_list       = "<leader>bl",
 	-- markdown + organize

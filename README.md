@@ -196,11 +196,19 @@ it files the current file — or the Oil entry / visual selection — into a
 
 ### logarktos.lua
 
+- **Auto-backfill on read:** whenever an existing per-folder `logarktos.lua` is
+  loaded (layouts, tab naming, organize, …), any standard keys introduced after
+  that file was written are added automatically — same fill rules as
+  `:Logarktos` (`tabname`, `organize`, `aimode`, `work`, `textwork`, and nested
+  defaults). Existing values are never overwritten. A short notice lists what
+  was added. Legacy `logarktos.env` is converted and filled on first read.
 - `:Logarktos` — refresh the current folder's `logarktos.lua` (Oil dir, then
   buffer dir, then cwd). Keeps every key already defined; adds any standard
   categories/keys that are still missing (`tabname`, `organize`, `aimode`,
   `work`, and nested defaults such as `organize.fixed`). Creates the file when
   absent. Each known field is written with one short comment line above it.
+  (Usually unnecessary now that loads backfill missing keys, but still useful
+  to create a full template in a folder that has no file yet.)
 - **Oil pin:** when a directory contains `logarktos.lua`, Oil lists it first
   (immediately after `../`), via a sort-only column registered at setup.
 

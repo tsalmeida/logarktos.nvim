@@ -256,7 +256,11 @@ local function serialize_value(val, indent, path)
 	local lines = {}
 	for _, k in ipairs(keys) do
 		local child_path = path == "" and tostring(k) or (path .. "." .. tostring(k))
+		-- Prefer dotted paths (e.g. "organize.files"); fall back to bare key
+		-- names for shared pane fields (path / cmd / focus under any layout).
 		local comment = KEY_COMMENTS[child_path]
+			or (type(k) == "string" and KEY_COMMENTS[k])
+			or nil
 		if comment then
 			lines[#lines + 1] = { kind = "comment", text = pad1 .. "-- " .. comment }
 		end
@@ -323,6 +327,10 @@ function M.save_file(path, data)
 	return true
 end
 
+--- After loading an on-disk folder config, add any standard keys that were
+--- introduced after that file was written (e.g. `tabname`). Writes the file
+--- when something was missing. Implemented below `deep_fill_missing` / folder
+--- template; called via `M.apply_folder_defaults` at runtime.
 function M.load_dir(dir)
 	local path = M.path_in(dir)
 	if not path then return nil end
@@ -330,9 +338,12 @@ function M.load_dir(dir)
 	if data then
 		data._path = path
 		data._dir = dir
+		-- Older project files often predate keys like tabname — backfill on read
+		-- so space+am / space+wm / tab naming always see a complete shape.
+		M.persist_folder_defaults(data, dir)
 		return data
 	end
-	-- Legacy logarktos.env → in-memory table (not rewritten until a section is saved).
+	-- Legacy logarktos.env → convert, fill standard keys, and write logarktos.lua.
 	local legacy = util.join(dir, M.LEGACY_ENV)
 	if util.exists(legacy) then
 		local converted = M.parse_legacy_env(legacy, dir)
@@ -340,6 +351,7 @@ function M.load_dir(dir)
 			converted._path = path
 			converted._dir = dir
 			converted._from_legacy = true
+			M.persist_folder_defaults(converted, dir)
 			return converted
 		end
 	end
@@ -493,6 +505,10 @@ function M.ensure_organize(base)
 			changed = true
 		end
 	end
+	-- New files (and any still-missing top-level keys) get the full standard shape.
+	if #M.apply_folder_defaults(data, base) > 0 then
+		changed = true
+	end
 
 	if changed or file_missing or data._from_legacy then
 		M.save_dir(base, data)
@@ -569,6 +585,45 @@ local function deep_fill_missing(target, template, prefix)
 	return added
 end
 
+--- Fill missing standard folder keys into an in-memory table (no write).
+--- @return string[] dotted paths that were added
+function M.apply_folder_defaults(data, dir)
+	if type(data) ~= "table" then return {} end
+	return deep_fill_missing(data, M.folder_template(dir))
+end
+
+--- Apply folder defaults and write the file when anything was missing (or the
+--- table came from a legacy logarktos.env). Used by load_dir so every read of
+--- an existing project file grows to the current standard shape.
+--- @return string[] paths that were added (empty if already complete / no write)
+function M.persist_folder_defaults(data, dir)
+	if type(data) ~= "table" or not dir or dir == "" then return {} end
+	local path = data._path or M.path_in(dir)
+	local added = M.apply_folder_defaults(data, dir)
+	local from_legacy = data._from_legacy
+	if #added == 0 and not from_legacy then
+		return {}
+	end
+	if not M.save_dir(dir, data) then
+		return {}
+	end
+	data._from_legacy = nil
+	table.sort(added)
+	if #added > 0 then
+		util.notify(
+			"Updated " .. (path or "logarktos.lua") .. " — added missing defaults: "
+				.. table.concat(added, ", "),
+			vim.log.levels.INFO
+		)
+	elseif from_legacy then
+		util.notify(
+			"Migrated logarktos.env → " .. (path or "logarktos.lua"),
+			vim.log.levels.INFO
+		)
+	end
+	return added
+end
+
 --- Directory for :Logarktos: Oil dir → current file's dir → cwd.
 local function refresh_work_dir()
 	if vim.bo.filetype == "oil" then
@@ -582,6 +637,7 @@ end
 
 --- Refresh this folder's logarktos.lua: keep every existing key, add any
 --- standard category/key that is still missing. Creates the file when absent.
+--- (Existing files are also auto-backfilled whenever they are loaded.)
 --- @param dir string|nil  folder to refresh (default: Oil / buffer / cwd)
 --- @return boolean ok, string[]|nil added_paths
 function M.refresh(dir)
@@ -596,10 +652,26 @@ function M.refresh(dir)
 	end
 
 	local path = M.path_in(dir)
-	local data = M.load_or_empty(dir)
 	local file_missing = path and not util.exists(path)
-	local template = M.folder_template(dir)
-	local added = deep_fill_missing(data, template)
+	-- Load raw (not via load_dir) so this command owns notify / write once.
+	-- Auto-backfill on other reads still goes through load_dir → persist_folder_defaults.
+	local data
+	if not file_missing then
+		data = M.load_file(path) or {}
+		data._path = path
+		data._dir = dir
+	else
+		local legacy = util.join(dir, M.LEGACY_ENV)
+		if util.exists(legacy) then
+			data = M.parse_legacy_env(legacy, dir) or {}
+			data._path = path
+			data._dir = dir
+			data._from_legacy = true
+		else
+			data = { _path = path, _dir = dir }
+		end
+	end
+	local added = M.apply_folder_defaults(data, dir)
 
 	if not (file_missing or #added > 0 or data._from_legacy) then
 		util.notify((path or "logarktos.lua") .. " is already up to date", vim.log.levels.INFO)
@@ -715,6 +787,10 @@ function M.ensure_aimode(base)
 		filled = #added > 0
 	end
 	seed_organize_if_new_file(data, file_missing)
+	-- Brand-new files from this layout also get tabname / work / textwork, etc.
+	if #M.apply_folder_defaults(data, base) > 0 then
+		filled = true
+	end
 	if section_missing or file_missing or data._from_legacy or filled then
 		M.save_dir(base, data)
 		data._from_legacy = nil
@@ -756,6 +832,9 @@ function M.ensure_work(base)
 		end
 	end
 	seed_organize_if_new_file(data, file_missing)
+	if #M.apply_folder_defaults(data, base) > 0 then
+		filled = true
+	end
 	if section_missing or file_missing or data._from_legacy or filled then
 		M.save_dir(base, data)
 		data._from_legacy = nil
@@ -807,6 +886,9 @@ function M.ensure_textwork(base)
 		filled = #added > 0
 	end
 	seed_organize_if_new_file(data, file_missing)
+	if #M.apply_folder_defaults(data, base) > 0 then
+		filled = true
+	end
 	if section_missing or file_missing or data._from_legacy or filled then
 		M.save_dir(base, data)
 		data._from_legacy = nil

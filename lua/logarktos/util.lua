@@ -30,14 +30,85 @@ function M.interactive_shell_argv()
 	return { vim.o.shell }
 end
 
+--- Working directory a terminal buffer was started in (or last pinned to).
+--- Prefers `b:logarktos_term_cwd`, then the `{cwd}` in `term://{cwd}//{pid}:{cmd}`.
+--- Does not use `:p:h` of the buffer name — that turns `term://C:\proj//1:pwsh`
+--- into a nonsense parent path.
+--- @param buf? integer
+--- @return string|nil
+function M.terminal_cwd(buf)
+	buf = buf or vim.api.nvim_get_current_buf()
+	if not buf or not vim.api.nvim_buf_is_valid(buf) then return nil end
+	local tagged = vim.b[buf].logarktos_term_cwd
+	if type(tagged) == "string" and tagged ~= "" and M.is_dir(tagged) then
+		return M.normalize(tagged)
+	end
+	local name = vim.api.nvim_buf_get_name(buf)
+	if type(name) ~= "string" or name == "" then return nil end
+	-- Neovim: term://{cwd}//{pid}:{cmd}. `{cwd}` may contain drive-letter colons.
+	local cwd = name:match("^term://(.*)//%d+:")
+	if not cwd or cwd == "" then return nil end
+	if not M.is_dir(cwd) then
+		local abs = vim.fn.fnamemodify(cwd, ":p")
+		if M.is_dir(abs) then cwd = abs end
+	end
+	if M.is_dir(cwd) then return M.normalize(cwd) end
+	return nil
+end
+
+--- Directory a "here" terminal (space+ht / space+wt) should start in.
+--- Window/tab `lcd`/`tcd` first (so a split of an AIMode pane keeps that
+--- pane's folder), then the current terminal's own cwd, then Oil listing /
+--- file parent. Capture this *before* replacing the buffer — a fresh empty
+--- buffer has no path of its own.
+--- @param win? integer
+--- @param buf? integer
+--- @return string
+function M.here_terminal_cwd(win, buf)
+	win = win or vim.api.nvim_get_current_win()
+	buf = buf or vim.api.nvim_win_get_buf(win)
+	-- 1 = window lcd, 2 = tab tcd. Either is the pane's "active directory".
+	if vim.fn.haslocaldir(win) ~= 0 then
+		local local_dir = vim.fn.getcwd(win)
+		if type(local_dir) == "string" and local_dir ~= "" then
+			return M.normalize(local_dir)
+		end
+	end
+	if vim.bo[buf].buftype == "terminal" then
+		local tdir = M.terminal_cwd(buf)
+		if tdir then return tdir end
+	end
+	if vim.bo[buf].filetype == "oil" then
+		local dir = M.oil_dir(buf)
+		if dir then return dir end
+	end
+	local path = vim.api.nvim_buf_get_name(buf)
+	if path ~= "" and vim.bo[buf].buftype ~= "terminal" then
+		return vim.fn.fnamemodify(path, ":p:h")
+	end
+	return vim.fn.getcwd(win)
+end
+
 --- Open an interactive shell in the current window (or after a split).
 --- Always installs a fresh buffer first: `termopen` requires an unmodified
 --- buffer, and a split of an existing terminal reuses that (always-modified)
 --- buffer — so space+ht on top of a terminal would fail with E5108 otherwise.
 --- The old buffer stays open in any other window still showing it.
+---
+--- When `opts.cwd` is omitted, the new shell starts in the invoking window's
+--- active directory (AIMode/Work `lcd`/`tcd`, the terminal being replaced, Oil
+--- listing, or the file's parent) — never Neovim's launch cwd by accident.
 --- @param opts? { vsplit?: boolean, split?: boolean, cwd?: string, startinsert?: boolean }
 function M.open_interactive_terminal(opts)
 	opts = opts or {}
+	-- Capture before split / buffer replace: those steal the context the new
+	-- shell must inherit (standing BUFFER / WINDOW IDENTITY rule).
+	local src_win = vim.api.nvim_get_current_win()
+	local src_buf = vim.api.nvim_win_get_buf(src_win)
+	local cwd = opts.cwd
+	if type(cwd) ~= "string" or cwd == "" then
+		cwd = M.here_terminal_cwd(src_win, src_buf)
+	end
 	if opts.vsplit then
 		vim.cmd("vsplit")
 	elseif opts.split then
@@ -51,10 +122,16 @@ function M.open_interactive_terminal(opts)
 	-- Must be a Vim dictionary. A bare Lua `{}` becomes an empty *list* over
 	-- the API bridge, and termopen then fails with E475 "expected dictionary".
 	local term_opts = vim.empty_dict()
-	if opts.cwd and opts.cwd ~= "" then
-		term_opts.cwd = opts.cwd
+	if cwd and cwd ~= "" then
+		term_opts.cwd = cwd
+		vim.b[fresh].logarktos_term_cwd = cwd
 	end
 	vim.fn.termopen(M.interactive_shell_argv(), term_opts)
+	-- Pin the window so a later Ctrl-W s / space+ht inherits this folder,
+	-- even when the tab has no tcd (and so termopen-cwd lived only in the name).
+	if cwd and cwd ~= "" then
+		pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd))
+	end
 	if opts.startinsert ~= false then
 		vim.cmd("startinsert")
 	end
@@ -489,8 +566,14 @@ end
 --- Resolve a working directory from a buffer:
 --- Oil selected folder (or Oil dir) → focus path (bookmark/recent/file) as dir → cwd.
 --- Layouts use this for terminals, lcd, and logarktos.lua base folder.
+--- Terminal buffers are *not* treated as files: `:p:h` of `term://…` is garbage.
 function M.resolve_cwd(buf)
 	buf = buf or vim.api.nvim_get_current_buf()
+	if vim.bo[buf].buftype == "terminal" then
+		local tdir = M.terminal_cwd(buf)
+		if tdir then return tdir end
+		return vim.fn.getcwd()
+	end
 	local ft = vim.bo[buf].filetype
 	if ft == "oil" then
 		-- Folder under the cursor wins (same idea as space+bl bookmarks).

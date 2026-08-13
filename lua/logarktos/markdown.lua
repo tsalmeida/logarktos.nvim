@@ -122,15 +122,74 @@ local function target_dir(opts)
 	return vim.fn.getcwd()
 end
 
+local function default_template_name()
+	return config.options.markdown.template or "template.md"
+end
+
+--- Extra templates in `dir`: `template_read.md`, `template-talk.md`, …
+--- The default `template.md` is not listed (bare Enter still selects it).
+--- @return { suffix: string, name: string, key: string }[]
+local function list_template_variants(dir)
+	local default = default_template_name():lower()
+	local found = {}
+	local handle = uv.fs_scandir(dir)
+	if not handle then return found end
+	while true do
+		local name, typ = uv.fs_scandir_next(handle)
+		if not name then break end
+		if typ ~= "directory" then
+			local lower = name:lower()
+			if lower ~= default and lower:match("%.md$") then
+				-- template_read.md → "read"; template-talk.md → "talk"
+				local suffix = name:match("^[Tt][Ee][Mm][Pp][Ll][Aa][Tt][Ee][_%-](.+)%.[Mm][Dd]$")
+				if suffix and suffix ~= "" then
+					table.insert(found, { suffix = suffix, name = name, key = suffix:lower() })
+				end
+			end
+		end
+	end
+	table.sort(found, function(a, b)
+		return a.key < b.key
+	end)
+	return found
+end
+
+--- Match user input to a variant: exact suffix, then unique prefix.
+--- Accepts "read", "a", "template_read", "template_read.md".
+--- @return table|nil, string|nil picked, error
+local function match_template_variant(variants, input)
+	local q = vim.trim(input):lower()
+	q = q:gsub("%.md$", "")
+	q = q:gsub("^template[_%-]", "")
+	if q == "" then return nil, "empty" end
+
+	local exact, prefixes = nil, {}
+	for _, v in ipairs(variants) do
+		if v.key == q then
+			exact = v
+		elseif v.key:sub(1, #q) == q then
+			table.insert(prefixes, v)
+		end
+	end
+	if exact then return exact end
+	if #prefixes == 1 then return prefixes[1] end
+	if #prefixes > 1 then
+		local names = {}
+		for _, v in ipairs(prefixes) do
+			names[#names + 1] = v.suffix
+		end
+		return nil, "Ambiguous template: " .. table.concat(names, ", ")
+	end
+	return nil, 'No template starting with "' .. input .. '"'
+end
+
 -- ── New Markdown ─────────────────────────────────────────────────────────────
 function M.new_markdown(opts)
 	local dir = target_dir(opts)
 	if not dir or dir == "" then return end
 
-	vim.ui.input({ prompt = "Title (Enter to skip): " }, function(input)
-		if input == nil then return end
-
-		local title = vim.trim(input)
+	local function create_note(title, template_name)
+		title = vim.trim(title or "")
 		local stamp = os.date(config.options.markdown.timestamp or "%Y%m%d - %H%M%S")
 		local filename
 		if title ~= "" then
@@ -143,7 +202,6 @@ function M.new_markdown(opts)
 		local path = util.join(dir, filename)
 		if uv.fs_stat(path) then return end
 
-		local template_name = config.options.markdown.template or "template.md"
 		local template_path = util.join(dir, template_name)
 		local marker = config.options.markdown.focus_marker or ""
 		local date_marker = config.options.markdown.date_marker or ""
@@ -244,7 +302,48 @@ function M.new_markdown(opts)
 			end
 			util.notify("Created " .. filename .. (used_template and (" (from " .. template_name .. ")") or ""))
 		end
-	end)
+	end
+
+	local function ask_title(template_name)
+		vim.ui.input({ prompt = "Title (Enter to skip): " }, function(input)
+			if input == nil then return end
+			create_note(input, template_name)
+		end)
+	end
+
+	-- Only prompt when the folder has template_<suffix>.md variants.
+	-- A lone template.md keeps the old one-step title prompt.
+	local variants = list_template_variants(dir)
+	if #variants == 0 then
+		ask_title(default_template_name())
+		return
+	end
+
+	local labels = {}
+	for _, v in ipairs(variants) do
+		labels[#labels + 1] = v.suffix
+	end
+	local default = default_template_name()
+	local prompt = ("Template [%s] (Enter = %s): "):format(table.concat(labels, ", "), default)
+
+	local function ask_template()
+		vim.ui.input({ prompt = prompt }, function(input)
+			if input == nil then return end
+			input = vim.trim(input)
+			if input == "" then
+				ask_title(default)
+				return
+			end
+			local picked, err = match_template_variant(variants, input)
+			if not picked then
+				util.notify(err, vim.log.levels.WARN, "NewMarkdown")
+				vim.schedule(ask_template)
+				return
+			end
+			ask_title(picked.name)
+		end)
+	end
+	ask_template()
 end
 
 -- ── Filing Markdown away (archive/, drafts/) ─────────────────────────────────

@@ -254,6 +254,9 @@ local function open_term(win, cwd, cmd, opts)
 	local term_opts = vim.empty_dict()
 	if cwd and cwd ~= "" then
 		term_opts.cwd = cwd
+		-- So space+ht on this pane (or a split of it) can recover the folder
+		-- even if lcd/tcd was never set or was later cleared.
+		vim.b[t_buf].logarktos_term_cwd = cwd
 	end
 	local has_cmd = cmd and cmd ~= ""
 	if has_cmd then
@@ -268,6 +271,11 @@ local function open_term(win, cwd, cmd, opts)
 	-- the terminal process, or the layout pane dies when the program exits.
 	-- List-form argv so Windows gets Bypass without a chansend race into stdin.
 	vim.fn.termopen(util.interactive_shell_argv(), term_opts)
+	-- Window-local cwd so Ctrl-W s copies this folder to the new pane, and
+	-- space+ht in that pane starts a shell there — not Neovim's launch dir.
+	if cwd and cwd ~= "" then
+		pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd))
+	end
 	if has_cmd then
 		-- Wait for the shell prompt, then feed the auto-start line as if typed.
 		vim.defer_fn(function()
@@ -407,6 +415,9 @@ local function build_work_layout(opts)
 
 	if opts.new_tab then
 		vim.cmd("tabnew")
+		-- Tab-local cwd: every new split in this Work tab inherits the folder
+		-- unless a pane pins its own lcd (Oil / open_term).
+		if cwd then pcall(vim.cmd, "tcd " .. vim.fn.fnameescape(cwd)) end
 	else
 		vim.cmd("only")
 	end
@@ -638,6 +649,11 @@ function M.ai_mode_tab()
 	local right_focus = am.right and am.right.focus or nil
 
 	vim.cmd("tabnew")
+	-- Tab-local cwd: Ctrl-W s / tabnew from this AIMode tab share the layout
+	-- folder. Oil panes then lcd to their own listing; the terminal lcds to
+	-- left.cwd (usually the same). Without this, the tab keeps Neovim's
+	-- launch directory and space+ht opens a shell there.
+	pcall(vim.cmd, "tcd " .. vim.fn.fnameescape(base))
 	local mid = vim.api.nvim_get_current_win()
 	vim.cmd("leftabove vnew")
 	local left = vim.api.nvim_get_current_win()

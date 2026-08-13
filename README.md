@@ -149,6 +149,14 @@ start **PowerShell with `-ExecutionPolicy Bypass`** via list-form `termopen`
 `'shell'` option, so configs can keep `'shell'` as `cmd.exe` for `:!` while
 interactive panes stay PowerShell-native.
 
+`:AIMode` / Work tabs pin a tab-local cwd (`:tcd`) to the layout folder, and
+each terminal pane pins a window-local cwd (`:lcd`) to that pane's folder.
+Splitting a pane (`Ctrl-W s`) therefore keeps the same directory, and
+`here_terminal` (space+ht) starts the new shell there — not in whatever
+directory Neovim itself was launched from. The same helper reads the current
+terminal's `term://{cwd}//…` name (or `b:logarktos_term_cwd`) when no `lcd`
+has been set yet.
+
 Legacy `logarktos.env` (`left:…` lines) is still read and converted when no
 `logarktos.lua` exists yet.
 
@@ -178,13 +186,17 @@ line per known field.
 
 `:LogarktosNewMarkdown` creates a `YYYYMMDD - HHMMSS[ - Title].md` note in the
 current Oil directory (or cwd), optionally seeded from a `template.md` found
-there (a `# Title` placeholder is replaced with your title). Any `*YYYYMMDD*`
-marker in the template is replaced with today's date in that format
-(configurable via `markdown.date_marker`). When a template is used the note
-opens straight away; if the template contains the focus marker
-`*template_focus*` (configurable via `markdown.focus_marker`) it is stripped and
-the cursor lands there in insert mode with the line centred. Without a template
-the behaviour is unchanged — in Oil you simply land on the new file.
+there (a `# Title` placeholder is replaced with your title). If the folder
+also has other `template_<suffix>.md` (or `template-<suffix>.md`) files, you
+are asked which one first — type a unique prefix (`a` → `template_adjustments.md`);
+bare Enter still uses `template.md`. A folder that only has `template.md`
+keeps the old one-step title prompt. Any `*YYYYMMDD*` marker in the template is
+replaced with today's date in that format (configurable via
+`markdown.date_marker`). When a template is used the note opens straight away;
+if the template contains the focus marker `*template_focus*` (configurable via
+`markdown.focus_marker`) it is stripped and the cursor lands there in insert
+mode with the line centred. Without a template the behaviour is unchanged — in
+Oil you simply land on the new file.
 `:LogarktosMarkdownArchive` tucks the current file, unchanged, into an
 `archive/` subfolder, then drops you into a refreshed Oil view of the original
 folder so the file disappears from the listing. From an Oil buffer it can also

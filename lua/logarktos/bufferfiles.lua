@@ -2,7 +2,8 @@
 --
 -- Write scratch notes in any empty buffer; the moment it gains text it is given
 -- a name under the bufferfiles root and autosaved. You never lose a scratch note
--- and never have to decide where to put it.
+-- and never have to decide where to put it. :w on an unnamed or nofile editor
+-- buffer also saves as a bufferfile — there is no "cannot write" empty buffer.
 --
 -- Policy:
 --   • Root holds at most `keep` most-recent files (by mtime).
@@ -163,6 +164,43 @@ local function is_bufferfile(buf)
 	return is_in_root_dir(name)
 end
 
+-- Editor buffers we are allowed to turn into bufferfiles. Skip UI panels,
+-- terminals, Oil, help/qf, and anything the user cannot edit.
+local function is_editor_buffer(buf)
+	if not vim.api.nvim_buf_is_valid(buf) then return false end
+	if not vim.api.nvim_buf_is_loaded(buf) then return false end
+	if not vim.bo[buf].buflisted then return false end
+	if not vim.bo[buf].modifiable then return false end
+	local bt = vim.bo[buf].buftype
+	if bt == "terminal" or bt == "prompt" or bt == "quickfix" or bt == "help" then
+		return false
+	end
+	local ft = vim.bo[buf].filetype
+	if ft == "oil" or util.is_list_panel(buf) then return false end
+	local name = vim.api.nvim_buf_get_name(buf)
+	if type(name) == "string" and name:find("://", 1, true) then return false end
+	return true
+end
+
+local function unname(buf)
+	pcall(vim.api.nvim_buf_call, buf, function()
+		vim.cmd("silent keepalt 0file")
+	end)
+	vim.b[buf].bufferfile_assigned = nil
+	vim.b[buf].bufferfile_path = nil
+	vim.b[buf].bufferfile_reload_after_write = nil
+end
+
+-- Drop buftype=nofile / nowrite so :write is allowed. Those values are how
+-- FileChangedShell (and scratch splits) mark "not a file" — and they produce
+-- E382 the moment the user tries to save.
+local function clear_blocking_buftype(buf)
+	local bt = vim.bo[buf].buftype
+	if bt == "nofile" or bt == "nowrite" then
+		vim.bo[buf].buftype = ""
+	end
+end
+
 local function reload_after_initial_write(buf, path)
 	if vim.b[buf].bufferfile_reload_scheduled then return end
 	vim.b[buf].bufferfile_reload_scheduled = true
@@ -188,12 +226,17 @@ local function autosave_bufferfile(buf)
 	if not buffer_has_text(buf) then
 		local name = vim.api.nvim_buf_get_name(buf)
 		if name ~= "" and uv.fs_stat(name) then vim.fn.delete(name) end
-		if vim.api.nvim_buf_get_option(buf, "modified") then
+		-- Unname immediately. Leaving the buffer pointed at a deleted file
+		-- lets the config's FileChangedShell handler set buftype=nofile, after
+		-- which :w is E382 and assign_name refuses to take over.
+		if name ~= "" then unname(buf) end
+		if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_option(buf, "modified") then
 			vim.api.nvim_buf_set_option(buf, "modified", false)
 		end
 		return
 	end
 
+	clear_blocking_buftype(buf)
 	local ok = pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent keepalt write") end)
 	if ok and vim.b[buf].bufferfile_reload_after_write then
 		local path = vim.b[buf].bufferfile_reload_after_write
@@ -258,19 +301,111 @@ local function next_path()
 	return path
 end
 
-local function assign_name(buf)
-	if vim.b[buf].bufferfile_assigned then return end
-	if vim.api.nvim_buf_get_name(buf) ~= "" then return end
-	if vim.bo[buf].buftype ~= "" then return end
-	if not vim.api.nvim_buf_get_option(buf, "modifiable") then return end
-	if not buffer_has_text(buf) then return end
-
-	local path = next_path()
-	vim.api.nvim_buf_set_name(buf, path)
+local function mark_assigned(buf, path, reload)
 	vim.b[buf].bufferfile_assigned = true
 	vim.b[buf].bufferfile_path = path
-	vim.b[buf].bufferfile_reload_after_write = path
+	if reload then
+		vim.b[buf].bufferfile_reload_after_write = path
+	end
 	ensure_confirm_disabled(buf)
+end
+
+local function assign_name(buf, opts)
+	opts = opts or {}
+	if vim.b[buf].bufferfile_assigned and vim.api.nvim_buf_get_name(buf) ~= "" then
+		return
+	end
+	if vim.api.nvim_buf_get_name(buf) ~= "" then return end
+	if not vim.api.nvim_buf_get_option(buf, "modifiable") then return end
+	if not opts.even_empty and not buffer_has_text(buf) then return end
+
+	local path = next_path()
+	local ok = pcall(vim.api.nvim_buf_set_name, buf, path)
+	if not ok then
+		pcall(vim.api.nvim_buf_call, buf, function()
+			vim.cmd("silent keepalt file " .. vim.fn.fnameescape(path))
+		end)
+	end
+	if vim.api.nvim_buf_get_name(buf) == "" then return end
+	mark_assigned(buf, path, true)
+end
+
+-- Make a listed editor buffer writable. Unnamed, nofile, and buffers whose
+-- file has vanished on disk all become (or stay) a bufferfile so :w never
+-- raises E32 / E382. UI panels, Oil, and terminals are left alone.
+-- opts.even_empty: assign a path even when the buffer has no text (user :w).
+function M.ensure_writable(buf, opts)
+	opts = opts or {}
+	buf = buf or vim.api.nvim_get_current_buf()
+	if not is_editor_buffer(buf) then return false end
+
+	clear_blocking_buftype(buf)
+
+	local name = vim.api.nvim_buf_get_name(buf)
+	if name ~= "" then
+		local exists = uv.fs_stat(name) ~= nil
+		if exists or is_in_root_dir(name) then
+			if is_in_root_dir(name) then
+				mark_assigned(buf, name, not exists)
+			end
+			return vim.bo[buf].buftype == ""
+		end
+		-- Stale path (deleted real file). Drop it and save as a bufferfile
+		-- instead of recreating the vanished location.
+		unname(buf)
+		name = vim.api.nvim_buf_get_name(buf)
+	end
+
+	if name == "" then
+		assign_name(buf, { even_empty = opts.even_empty })
+	end
+	return vim.api.nvim_buf_get_name(buf) ~= "" and vim.bo[buf].buftype == ""
+end
+
+local function ensure_all_writable(even_empty)
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.api.nvim_buf_is_loaded(buf) then
+			M.ensure_writable(buf, { even_empty = even_empty })
+		end
+	end
+end
+
+-- :w / :wq / :update (no filename) → assign a bufferfile if needed.
+-- :wa → same for every loaded editor buffer.
+-- :w path → only lift a blocking buftype so the chosen path can be written.
+local function write_cmdline_kind(line)
+	line = vim.trim(line or "")
+	if line == "" then return nil end
+	if line:match("^%%?%s*wa[ll]*!*%s*$")
+		or line:match("^wqa[ll]*!*%s*$")
+		or line:match("^xa[ll]*!*%s*$")
+	then
+		return "all"
+	end
+	if line:match("^%%?%s*w[rite]*!*%s*$")
+		or line:match("^up[date]*!*%s*$")
+		or line:match("^x[it]*!*%s*$")
+		or line:match("^exit!*%s*$")
+		or line:match("^wq!*%s*$")
+	then
+		return "bare"
+	end
+	if line:match("^%%?%s*w[rite]*!*%s+%S+") then
+		return "path"
+	end
+	return nil
+end
+
+local function prepare_from_cmdline(line)
+	local kind = write_cmdline_kind(line)
+	if kind == "all" then
+		ensure_all_writable(true)
+	elseif kind == "bare" then
+		M.ensure_writable(vim.api.nvim_get_current_buf(), { even_empty = true })
+	elseif kind == "path" then
+		local buf = vim.api.nvim_get_current_buf()
+		if is_editor_buffer(buf) then clear_blocking_buftype(buf) end
+	end
 end
 
 -- ── listing & maintenance ────────────────────────────────────────────────────
@@ -367,10 +502,10 @@ function M.setup()
 		group = group,
 		callback = function(args)
 			if not vim.api.nvim_buf_is_valid(args.buf) then return end
-			assign_name(args.buf)
+			M.ensure_writable(args.buf)
 			if not vim.api.nvim_buf_is_loaded(args.buf) then return end
 			if not vim.api.nvim_buf_get_option(args.buf, "modified") then return end
-			-- Only schedule for real bufferfiles (named empties get assign_name
+			-- Only schedule for real bufferfiles (named empties get a name
 			-- first; next modified event will hit is_bufferfile).
 			if is_bufferfile(args.buf) then
 				schedule_autosave(args.buf)
@@ -382,6 +517,9 @@ function M.setup()
 	vim.api.nvim_create_autocmd("BufEnter", {
 		group = group,
 		callback = function(args)
+			-- Recover nofile / vanished-file editor buffers even if the user
+			-- has not typed since FileChangedShell detached them.
+			M.ensure_writable(args.buf)
 			if is_bufferfile(args.buf) then
 				vim.b[args.buf].bufferfile_assigned = true
 				vim.b[args.buf].bufferfile_path = vim.api.nvim_buf_get_name(args.buf)
@@ -389,6 +527,38 @@ function M.setup()
 			end
 		end,
 		desc = "Disable confirm prompts when editing bufferfiles",
+	})
+
+	-- FileChangedShell in the user config used to set buftype=nofile on a
+	-- deleted dirty file. That autocmd schedules the detach; this Post hook
+	-- is queued after it (FIFO) and lifts nofile so :w is never E382.
+	vim.api.nvim_create_autocmd("FileChangedShellPost", {
+		group = group,
+		callback = function(args)
+			vim.schedule(function()
+				if vim.api.nvim_buf_is_valid(args.buf) then
+					M.ensure_writable(args.buf)
+				end
+			end)
+		end,
+		desc = "Recover editor buffers after a deleted-file detach",
+	})
+
+	-- :w / :wq / :update / :wa — including confirm-less empty unnamed buffers
+	-- (E32) and leftover nofile buffers (E382). CmdlineLeavePre runs before
+	-- the write, so the buffer already has a path and an empty buftype.
+	local function on_write_cmdline()
+		if vim.fn.getcmdtype() ~= ":" then return end
+		if vim.v.event and vim.v.event.abort then return end
+		prepare_from_cmdline(vim.fn.getcmdline())
+	end
+	-- CmdlineLeavePre is Neovim 0.11+; fall back to CmdlineLeave (still
+	-- before the write for `:` commands on current builds).
+	local write_ev = (vim.fn.exists("##CmdlineLeavePre") == 1) and "CmdlineLeavePre" or "CmdlineLeave"
+	vim.api.nvim_create_autocmd(write_ev, {
+		group = group,
+		callback = on_write_cmdline,
+		desc = "Save unnamed/nofile editor buffers as bufferfiles",
 	})
 
 	vim.api.nvim_create_autocmd({ "BufLeave", "BufUnload", "BufWipeout" }, {
@@ -444,12 +614,15 @@ function M.setup()
 			end
 			for _, buf in ipairs(vim.api.nvim_list_bufs()) do
 				if vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_option(buf, "modifiable") then
+					M.ensure_writable(buf)
 					local name = vim.api.nvim_buf_get_name(buf)
 					if name ~= "" and is_in_root_dir(name) and vim.api.nvim_buf_get_option(buf, "modified") then
 						if buffer_has_text(buf) then
+							clear_blocking_buftype(buf)
 							pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent keepalt write") end)
 						else
 							if uv.fs_stat(name) then pcall(vim.fn.delete, name) end
+							unname(buf)
 							pcall(vim.api.nvim_buf_set_option, buf, "modified", false)
 						end
 					end

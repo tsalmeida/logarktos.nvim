@@ -912,7 +912,7 @@ end
 
 local USER_DEFAULTS = {
 	start_dir = nil,
-	ignore_dirs = { ".git", "node_modules" },
+	ignore_dirs = { ".git", "node_modules", ".venv", "venv" },
 	bufferfiles = {
 		dir = nil, -- nil → plugin default under stdpath("state")
 		keep = 20,
@@ -1016,7 +1016,19 @@ function M.user_to_setup_opts(user)
 	end
 	if type(user.ignore_dirs) == "table" then
 		opts.recentfiles = opts.recentfiles or {}
-		opts.recentfiles.ignore_dirs = user.ignore_dirs
+		-- Union with plugin defaults so a custom list cannot drop .git / .venv.
+		local seen, merged = {}, {}
+		local function add(list)
+			for _, d in ipairs(list or {}) do
+				if type(d) == "string" and d ~= "" and not seen[d] then
+					seen[d] = true
+					merged[#merged + 1] = d
+				end
+			end
+		end
+		add(require("logarktos.config").defaults.recentfiles.ignore_dirs)
+		add(user.ignore_dirs)
+		opts.recentfiles.ignore_dirs = merged
 	end
 	if type(user.bufferfiles) == "table" then
 		opts.bufferfiles = vim.tbl_deep_extend("force", {}, user.bufferfiles)

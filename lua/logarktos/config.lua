@@ -96,7 +96,7 @@ M.defaults = {
 
 	recentfiles = {
 		extensions = nil, -- nil = every file type
-		ignore_dirs = { ".git", "node_modules" },
+		ignore_dirs = { ".git", "node_modules", ".venv", "venv", "__pycache__" },
 		limit = 20,
 	},
 

@@ -4,25 +4,56 @@ local config = require("logarktos.config")
 local M = {}
 local uv = vim.uv or vim.loop
 
-local function scandir_files(dir)
-	local ok, scandir = pcall(require, "plenary.scandir")
-	if ok then
-		return scandir.scan_dir(dir, { depth = 20, hidden = true, add_dirs = false })
-	end
-	return vim.fn.globpath(dir, "**/*", false, true)
-end
+-- Walk, do not globpath("**/*"): that materializes every path under the tree
+-- (including .venv / Obras/Games) before ignore_dirs can filter, and on Windows
+-- it can follow directory junctions into a parent or C:\.
+local HARD_SKIP = {
+	[".git"] = true,
+	[".svn"] = true,
+	[".hg"] = true,
+	["node_modules"] = true,
+	[".venv"] = true,
+	["venv"] = true,
+	["__pycache__"] = true,
+	[".cache"] = true,
+}
+local MAX_VISIT = 5000
+local MAX_DEPTH = 12
 
 local function ignore_dirs()
-	return (config.options.recentfiles and config.options.recentfiles.ignore_dirs) or { ".git", "node_modules" }
+	return (config.options.recentfiles and config.options.recentfiles.ignore_dirs)
+		or { ".git", "node_modules", ".venv", "venv", "__pycache__" }
+end
+
+local function skip_needles()
+	local out = {}
+	for _, d in ipairs(ignore_dirs()) do
+		local needle = tostring(d):gsub("\\", "/"):gsub("^/+", ""):gsub("/+$", "")
+		if needle ~= "" then
+			out[#out + 1] = needle
+		end
+	end
+	return out
 end
 
 local function is_skipped(path)
-	local lower = path:gsub("\\", "/")
-	for _, d in ipairs(ignore_dirs()) do
-		local needle = d:gsub("\\", "/")
-		if lower:find("/" .. needle .. "/", 1, true) or lower:match("/" .. vim.pesc(needle) .. "$") then
+	local lower = path:gsub("\\", "/"):lower()
+	for _, needle in ipairs(skip_needles()) do
+		local n = needle:lower()
+		if lower:find("/" .. n .. "/", 1, true) or lower:match("/" .. vim.pesc(n) .. "$") then
 			return true
 		end
+	end
+	return false
+end
+
+local function dir_basename_skipped(name)
+	if not name or name == "" or name == "." or name == ".." then return true end
+	if HARD_SKIP[name] or HARD_SKIP[name:lower()] then return true end
+	local lower = name:lower()
+	for _, needle in ipairs(skip_needles()) do
+		local base = needle:match("([^/]+)$") or needle
+		if lower == base:lower() then return true end
 	end
 	return false
 end
@@ -46,13 +77,6 @@ local function stat_mtime_ns(path)
 	return sec * 1e9 + nsec
 end
 
-local function ensure_absolute(path, base)
-	if path:match("^[A-Za-z]:") or path:sub(1, 1) == "/" then return path end
-	local sep = package.config:sub(1, 1)
-	if base:sub(-1) == sep then return base .. path end
-	return base .. sep .. path
-end
-
 local function relative_path(path, base)
 	if vim.fs and vim.fs.relpath then
 		local ok, rel = pcall(vim.fs.relpath, path, base)
@@ -67,17 +91,44 @@ end
 
 local function gather_recent(dir, limit, opts)
 	opts = opts or {}
-	local paths = scandir_files(dir)
+	dir = vim.fs.normalize(dir):gsub("\\", "/")
 	local ranked = {}
-	for _, path in ipairs(paths) do
-		path = ensure_absolute(path, dir)
-		if not is_skipped(path) and matches_extension(path, opts.extensions) then
-			if not opts.filter or opts.filter(path) then
-				local mtns = stat_mtime_ns(path)
-				if mtns then table.insert(ranked, { path = path, mtns = mtns }) end
+	local visits = 0
+
+	local function consider_file(path)
+		if not matches_extension(path, opts.extensions) then return end
+		if is_skipped(path) then return end
+		if opts.filter and not opts.filter(path) then return end
+		local mtns = stat_mtime_ns(path)
+		if mtns then ranked[#ranked + 1] = { path = path, mtns = mtns } end
+	end
+
+	local function walk(path, depth)
+		if depth > MAX_DEPTH or visits >= MAX_VISIT then return end
+		local fd = uv.fs_scandir(path)
+		if not fd then return end
+		while visits < MAX_VISIT do
+			local name, typ = uv.fs_scandir_next(fd)
+			if not name then break end
+			visits = visits + 1
+			local child = path .. "/" .. name
+			-- lstat: do not follow Windows directory junctions (can loop into C:\).
+			local lst = uv.fs_lstat(child)
+			local kind = typ or (lst and lst.type)
+			-- Skip junctions/symlinks so a link to a parent or C:\ cannot explode.
+			if kind ~= "link" and not (lst and lst.type == "link") then
+				if kind == "directory" then
+					if not dir_basename_skipped(name) and not is_skipped(child) then
+						walk(child, depth + 1)
+					end
+				elseif kind == "file" then
+					consider_file(child)
+				end
 			end
 		end
 	end
+
+	walk(dir, 0)
 	table.sort(ranked, function(a, b) return a.mtns > b.mtns end)
 	local out = {}
 	for i = 1, math.min(limit, #ranked) do table.insert(out, ranked[i]) end

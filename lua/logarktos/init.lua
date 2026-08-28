@@ -85,6 +85,10 @@ function M.setup(opts)
 		require("logarktos.tabs").enable_tabline()
 	end
 
+	-- Windows: drop PSModulePath on this process and on interactive pwsh
+	-- panes so nested Windows PowerShell 5.1 can autoload Get-FileHash.
+	require("logarktos.winps").setup()
+
 	require("logarktos.commands").setup()
 	require("logarktos.keymaps").setup()
 

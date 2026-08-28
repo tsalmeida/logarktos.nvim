@@ -17,11 +17,22 @@ M.is_windows = M.sep == "\\"
 --- On Windows always starts pwsh/powershell with ExecutionPolicy Bypass on the
 --- argv — independent of Neovim's global `'shell'` (which stays cmd.exe so
 --- `:!` / plugins keep simple, fast quoting). No need to chansend Set-ExecutionPolicy.
+--- Nested `powershell.exe` (5.1) from that pwsh is handled by winps.lua:
+--- `-NoExit -Command` drops PSModulePath so grandchild 5.1 keeps Get-FileHash.
 --- @return string[]
 function M.interactive_shell_argv()
 	if M.is_windows then
 		local ps = (vim.fn.executable("pwsh") == 1) and "pwsh" or "powershell"
-		return { ps, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass" }
+		local argv = { ps, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass" }
+		-- Only pwsh prepends Core module paths that break grandchild 5.1.
+		-- A 5.1 pane must keep the Desktop PSModulePath it rebuilt at start.
+		if ps == "pwsh" then
+			local ok, winps = pcall(require, "logarktos.winps")
+			if ok and winps.append_nested_fix then
+				return winps.append_nested_fix(argv)
+			end
+		end
+		return argv
 	end
 	local sh = vim.env.SHELL
 	if type(sh) == "string" and sh ~= "" then

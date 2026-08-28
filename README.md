@@ -152,6 +152,14 @@ start **PowerShell with `-ExecutionPolicy Bypass`** via list-form `termopen`
 `'shell'` option, so configs can keep `'shell'` as `cmd.exe` for `:!` while
 interactive panes stay PowerShell-native.
 
+Native tools inside those panes that spawn Windows PowerShell 5.1 (Codex
+`codex update`, rustup, …) would otherwise inherit PowerShell 7's
+`PSModulePath`, and cmdlets such as `Get-FileHash` vanish. The pane starts
+with `-NoExit -Command` that drops `PSModulePath` after 7 has loaded (inbox
+cmdlets stay available from `$PSHOME`) so grandchild 5.1 rebuilds Desktop
+defaults. Retrying the original command after the error is unsafe —
+installers may have already downloaded a payload.
+
 `:AIMode` / Work tabs pin a tab-local cwd (`:tcd`) to the layout folder, and
 each terminal pane pins a window-local cwd (`:lcd`) to that pane's folder.
 Splitting a pane (`Ctrl-W s`) therefore keeps the same directory, and

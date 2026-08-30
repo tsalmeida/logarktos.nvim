@@ -8,7 +8,7 @@
 -- Example (user / nvim config root):
 --   return {
 --     tabname = "",  -- e.g. "NVIM-Config" to name tabs opened on this folder
---     start_dir = "C:/Logarktos/logarktos/",
+--     start_dir = "L:/Vault/",
 --     ignore_dirs = { ".git", "node_modules" },
 --     bufferfiles = { dir = "C:/…/bufferfiles/" },
 --     ai = { model = "gpt-5-mini", max_input_chars = 1000, default_instruction = "…" },

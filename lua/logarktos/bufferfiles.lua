@@ -208,7 +208,7 @@ local function reload_after_initial_write(buf, path)
 	vim.schedule(function()
 		if not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_buf_is_loaded(buf) then return end
 		if vim.api.nvim_buf_get_name(buf) ~= path then return end
-		if vim.api.nvim_buf_get_option(buf, "modified") then
+		if vim.bo[buf].modified then
 			vim.b[buf].bufferfile_reload_scheduled = nil
 			vim.b[buf].bufferfile_reload_after_write = path
 			return
@@ -221,7 +221,7 @@ end
 local function autosave_bufferfile(buf)
 	if not is_bufferfile(buf) then return end
 	if not vim.api.nvim_buf_is_loaded(buf) then return end
-	if not vim.api.nvim_buf_get_option(buf, "modifiable") then return end
+	if not vim.bo[buf].modifiable then return end
 
 	if not buffer_has_text(buf) then
 		local name = vim.api.nvim_buf_get_name(buf)
@@ -230,8 +230,8 @@ local function autosave_bufferfile(buf)
 		-- lets the config's FileChangedShell handler set buftype=nofile, after
 		-- which :w is E382 and assign_name refuses to take over.
 		if name ~= "" then unname(buf) end
-		if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_option(buf, "modified") then
-			vim.api.nvim_buf_set_option(buf, "modified", false)
+		if vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].modified then
+			vim.bo[buf].modified = false
 		end
 		return
 	end
@@ -245,8 +245,8 @@ local function autosave_bufferfile(buf)
 	end
 end
 
--- Debounce autosaves. BufModifiedSet fires on every keystroke once a bufferfile
--- is named: each immediate write was a full sync disk round-trip (and then
+-- Debounce autosaves. The modified-flag event fires on every keystroke once a
+-- bufferfile is named: each immediate write was a full sync disk round-trip (and then
 -- BufWritePost → maintain_now). That felt like typing lag especially under
 -- Neovide. Keep naming instant; only delay the write until typing pauses.
 local AUTOSAVE_MS = 750
@@ -316,7 +316,7 @@ local function assign_name(buf, opts)
 		return
 	end
 	if vim.api.nvim_buf_get_name(buf) ~= "" then return end
-	if not vim.api.nvim_buf_get_option(buf, "modifiable") then return end
+	if not vim.bo[buf].modifiable then return end
 	if not opts.even_empty and not buffer_has_text(buf) then return end
 
 	local path = next_path()
@@ -498,13 +498,22 @@ function M.setup()
 
 	local group = vim.api.nvim_create_augroup("LogarktosBufferfiles", { clear = true })
 
-	vim.api.nvim_create_autocmd("BufModifiedSet", {
+	-- BufModifiedSet was removed from Neovim 0.13-dev (2026-08 nightlies);
+	-- OptionSet with pattern "modified" is the upstream replacement and fires
+	-- on the same flag flips (typing, API edits, :w resets). Register
+	-- whichever event this build supports.
+	local modified_event, modified_pattern = "OptionSet", "modified"
+	if vim.fn.exists("##BufModifiedSet") == 1 then
+		modified_event, modified_pattern = "BufModifiedSet", nil
+	end
+	vim.api.nvim_create_autocmd(modified_event, {
 		group = group,
+		pattern = modified_pattern,
 		callback = function(args)
 			if not vim.api.nvim_buf_is_valid(args.buf) then return end
 			M.ensure_writable(args.buf)
 			if not vim.api.nvim_buf_is_loaded(args.buf) then return end
-			if not vim.api.nvim_buf_get_option(args.buf, "modified") then return end
+			if not vim.bo[args.buf].modified then return end
 			-- Only schedule for real bufferfiles (named empties get a name
 			-- first; next modified event will hit is_bufferfile).
 			if is_bufferfile(args.buf) then
@@ -613,17 +622,17 @@ function M.setup()
 				flush_autosave(buf)
 			end
 			for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-				if vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_option(buf, "modifiable") then
+				if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].modifiable then
 					M.ensure_writable(buf)
 					local name = vim.api.nvim_buf_get_name(buf)
-					if name ~= "" and is_in_root_dir(name) and vim.api.nvim_buf_get_option(buf, "modified") then
+					if name ~= "" and is_in_root_dir(name) and vim.bo[buf].modified then
 						if buffer_has_text(buf) then
 							clear_blocking_buftype(buf)
 							pcall(vim.api.nvim_buf_call, buf, function() vim.cmd("silent keepalt write") end)
 						else
 							if uv.fs_stat(name) then pcall(vim.fn.delete, name) end
 							unname(buf)
-							pcall(vim.api.nvim_buf_set_option, buf, "modified", false)
+							pcall(function() vim.bo[buf].modified = false end)
 						end
 					end
 				end

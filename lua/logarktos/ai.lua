@@ -318,7 +318,15 @@ local function new_right_split_with(lines)
 	vim.bo[buf].filetype = "markdown"
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.bo[buf].modified = true
-	pcall(vim.cmd, "doautocmd <nomodeline> BufModifiedSet")
+	-- Nudge the bufferfiles autosave autocmd. BufModifiedSet was removed from
+	-- Neovim 0.13-dev; OptionSet "modified" is its replacement (and on new
+	-- builds the vim.bo assignment above already fires it — the doautocmd is
+	-- a harmless belt-and-braces for both generations).
+	if vim.fn.exists("##BufModifiedSet") == 1 then
+		pcall(vim.cmd, "doautocmd <nomodeline> BufModifiedSet")
+	else
+		pcall(vim.cmd, "doautocmd <nomodeline> OptionSet modified")
+	end
 end
 
 local function extract_text_from_chat(data)

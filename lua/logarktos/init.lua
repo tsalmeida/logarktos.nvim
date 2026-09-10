@@ -55,7 +55,7 @@ function M.setup(opts)
 	opts = opts or {}
 
 	-- User file at stdpath("config")/logarktos.lua: start_dir, ignore_dirs,
-	-- bufferfiles, ai prefs, bookmarks, and optional aimode/work for that folder.
+	-- bufferfiles, ai prefs, bookmarks, and optional work/textwork for that folder.
 	-- setup() opts win over the file so the plugin list can still force keymaps etc.
 	local rcfile = require("logarktos.rcfile")
 	local seed = {}

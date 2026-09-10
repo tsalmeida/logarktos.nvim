@@ -1,6 +1,6 @@
 -- logarktos/rcfile.lua ── load / save `logarktos.lua` (user + per-folder)
 --
--- Per-folder files describe layout panes (aimode / work / textwork). The special
+-- Per-folder files describe layout panes (work / textwork). The special
 -- file at stdpath("config")/logarktos.lua also holds user preferences (start_dir,
 -- bufferfiles, ignore_dirs, bookmarks, AI model/limits, …). API keys stay in
 -- the real environment / a gitignored `.env` — never in these Lua files.
@@ -13,16 +13,10 @@
 --     bufferfiles = { dir = "C:/…/bufferfiles/" },
 --     ai = { model = "gpt-5-mini", max_input_chars = 1000, default_instruction = "…" },
 --     bookmarks = { "C:/path/to/file" },
---     aimode = {
---       left = { path = ".", cmd = "" },
---       center = { path = ".", focus = "" },
---       right = { path = ".", focus = "" },
---     },
 --     work = {
---       right = {
---         { path = ".", cmd = "" },
---         { path = ".", cmd = "" },
---       },
+--       left   = { mode = "terminal", path = ".", command = "" },
+--       center = { mode = "oil",      path = ".", command = "", focus = "" },
+--       right  = { mode = "oil",      path = ".", command = "", focus = "" },
 --     },
 --     textwork = {
 --       right = { focus = "" },
@@ -89,8 +83,10 @@ function M.rel_or_abs(abs, base)
 end
 
 --- Resolve a stored path (relative or absolute) against `base`.
+--- `""`, `"."`, and `"root"` all mean the layout folder.
 function M.resolve_path(raw, base)
-	if not raw or raw == "" or raw == "." then
+	if type(raw) == "string" then raw = vim.trim(raw) end
+	if not raw or raw == "" or raw == "." or (type(raw) == "string" and raw:lower() == "root") then
 		return base and util.normalize(base) or nil
 	end
 	if M.is_absolute(raw) then
@@ -159,12 +155,13 @@ local KEY_COMMENTS = {
 	["organize.fixed"] = "Folder names emptied into the folders bucket without a date prefix.",
 	["organize.files"] = '"timestamps" or "extensions" — how files are bucketed.',
 	-- Layouts
-	aimode = "AIMode (space+am): terminal left, Oil center, Oil right.",
-	work = "Work (space+wm / space+hw): editor + two terminals.",
+	work = "WorkMode (space+wm): three panes. Each has mode / path / command.",
 	textwork = "TextWork (space+tw): same file left+center, Oil right.",
 	["textwork.right.focus"] = "Oil entry to land on; empty = the dual-pane file.",
-	-- Pane fields (nested under aimode / work / textwork)
-	path = "Folder for this pane (relative to the layout folder, or absolute).",
+	-- Pane fields (nested under work / textwork)
+	mode = '"terminal", "oil", or "empty".',
+	path = 'Folder for this pane (relative, absolute, or "root" / "." for the layout folder).',
+	command = "Command typed into the terminal; empty = plain shell. Ignored unless mode is terminal.",
 	cmd = "Command typed into the terminal; empty = plain shell.",
 	focus = "Oil entry basename to land on; empty = Oil default.",
 }
@@ -214,16 +211,17 @@ local function serialize_value(val, indent, path)
 		ai = 4,
 		bookmarks = 5,
 		organize = 6,
-		aimode = 10,
-		work = 11,
+		work = 10,
 		textwork = 12,
 		left = 20,
 		center = 21,
 		right = 22,
+		mode = 29,
 		path = 30,
 		focus = 31,
-		cmd = 32,
-		cwd = 33,
+		command = 32,
+		cmd = 33,
+		cwd = 34,
 		dir = 34,
 		model = 40,
 		max_input_chars = 41,
@@ -428,40 +426,31 @@ function M.parse_legacy_env(path, base)
 		return nil
 	end
 
-	local aimode = {}
-	local lp = pane_from_entries(left)
-	local cp = pane_from_entries(center)
-	local rp = pane_from_entries(right)
-	if lp then aimode.left = lp end
-	if cp then aimode.center = cp end
-	if rp then aimode.right = { path = rp.path } end -- right cmds belong to work
-
-	local work = {}
-	if lp and lp.path then work.left = { path = lp.path } end
-	local right_list = {}
-	local right_path
-	for _, e in ipairs(right) do
-		if e.kind == "path" and e.path and not right_path then
-			right_path = M.rel_or_abs(e.path, base)
-		elseif e.kind == "cmd" and e.cmd then
-			right_list[#right_list + 1] = { cmd = e.cmd }
-		end
-	end
-	if right_path then
-		if #right_list == 0 then
-			right_list = { { path = right_path }, { path = right_path } }
-		else
-			for _, item in ipairs(right_list) do
-				item.path = item.path or right_path
+	local function work_pane_from_entries(entries, default_mode)
+		local pane = {
+			mode = default_mode,
+			path = ".",
+			command = "",
+			focus = "",
+		}
+		for _, e in ipairs(entries) do
+			if e.kind == "path" and e.path and (not pane.path or pane.path == ".") then
+				pane.path = M.rel_or_abs(e.path, base) or "."
+			elseif e.kind == "cmd" and e.cmd and pane.command == "" then
+				pane.command = e.cmd
+				pane.mode = "terminal"
 			end
 		end
+		return pane
 	end
-	if #right_list > 0 then work.right = right_list end
 
-	local out = {}
-	if next(aimode) then out.aimode = aimode end
-	if next(work) then out.work = work end
-	return next(out) and out or {}
+	return {
+		work = {
+			left = work_pane_from_entries(left, "terminal"),
+			center = work_pane_from_entries(center, "oil"),
+			right = work_pane_from_entries(right, "oil"),
+		},
+	}
 end
 
 -- ── organize section (per-folder :Organize) ──────────────────────────────────
@@ -554,7 +543,6 @@ function M.folder_template(base)
 		-- tabname: set this to pin layout tab titles for this folder.
 		tabname = "",
 		organize = M.default_organize(),
-		aimode = M.default_aimode(base),
 		work = M.default_work(base),
 		textwork = M.default_textwork(base),
 	}
@@ -599,9 +587,10 @@ end
 function M.persist_folder_defaults(data, dir)
 	if type(data) ~= "table" or not dir or dir == "" then return {} end
 	local path = data._path or M.path_in(dir)
+	local migrated = M.migrate_work_section(data, dir)
 	local added = M.apply_folder_defaults(data, dir)
 	local from_legacy = data._from_legacy
-	if #added == 0 and not from_legacy then
+	if #added == 0 and #migrated == 0 and not from_legacy then
 		return {}
 	end
 	if not M.save_dir(dir, data) then
@@ -609,7 +598,13 @@ function M.persist_folder_defaults(data, dir)
 	end
 	data._from_legacy = nil
 	table.sort(added)
-	if #added > 0 then
+	if #migrated > 0 then
+		local extra = #added > 0 and (" — also added: " .. table.concat(added, ", ")) or ""
+		util.notify(
+			"Updated " .. (path or "logarktos.lua") .. " — " .. table.concat(migrated, "; ") .. extra,
+			vim.log.levels.INFO
+		)
+	elseif #added > 0 then
 		util.notify(
 			"Updated " .. (path or "logarktos.lua") .. " — added missing defaults: "
 				.. table.concat(added, ", "),
@@ -671,9 +666,10 @@ function M.refresh(dir)
 			data = { _path = path, _dir = dir }
 		end
 	end
+	local migrated = M.migrate_work_section(data, dir)
 	local added = M.apply_folder_defaults(data, dir)
 
-	if not (file_missing or #added > 0 or data._from_legacy) then
+	if not (file_missing or #added > 0 or #migrated > 0 or data._from_legacy) then
 		util.notify((path or "logarktos.lua") .. " is already up to date", vim.log.levels.INFO)
 		return true, {}
 	end
@@ -702,7 +698,27 @@ function M.refresh(dir)
 	return true, added
 end
 
--- ── layout section ensure (AIMode / Work) ────────────────────────────────────
+-- ── layout section ensure (WorkMode) ─────────────────────────────────────────
+
+local VALID_MODES = { terminal = true, oil = true, empty = true }
+
+--- Normalize a pane mode string. Accepts a few aliases; unknown → nil.
+function M.normalize_mode(mode)
+	if type(mode) ~= "string" then return nil end
+	mode = vim.trim(mode):lower()
+	if mode == "term" or mode == "shell" then mode = "terminal" end
+	if mode == "scratch" or mode == "none" then mode = "empty" end
+	if VALID_MODES[mode] then return mode end
+	return nil
+end
+
+--- Stored path field: "" / "." / "root" all serialize as ".".
+function M.normalize_path_field(raw)
+	if type(raw) ~= "string" then return "." end
+	raw = vim.trim(raw)
+	if raw == "" or raw == "." or raw:lower() == "root" then return "." end
+	return raw
+end
 
 --- Optional Oil-entry focus string from a pane table (empty/absent → nil).
 local function pane_focus(pane)
@@ -714,49 +730,154 @@ local function pane_focus(pane)
 	return focus
 end
 
-local function pane_spec(pane, base)
+--- Resolve a stored pane into absolute paths / command / mode for layouts.
+--- @param fallback_mode string|nil used when `pane.mode` is missing
+local function pane_spec(pane, base, fallback_mode)
 	if type(pane) ~= "table" then
-		return { cwd = base, path = nil, cmd = nil, app = nil, focus = nil }
+		local mode = fallback_mode or "oil"
+		return {
+			mode = mode,
+			cwd = base,
+			path = base,
+			command = nil,
+			cmd = nil,
+			app = nil,
+			focus = nil,
+		}
 	end
+	local mode = M.normalize_mode(pane.mode) or fallback_mode or "oil"
 	local path = pane.path or pane.cwd
 	local abs = path and M.resolve_path(path, base) or base
-	local cmd = pane.cmd
-	if type(cmd) == "string" then cmd = vim.trim(cmd) end
-	if cmd == "" then cmd = nil end
+	local command = pane.command or pane.cmd
+	if type(command) == "string" then command = vim.trim(command) end
+	if command == "" then command = nil end
+	if mode ~= "terminal" then command = nil end
 	return {
+		mode = mode,
 		cwd = abs or base,
 		path = abs,
-		cmd = cmd,
-		app = pane.app or M.ai_app_name(cmd),
-		-- Only meaningful for Oil panes (AIMode center/right, Work left, …).
+		command = command,
+		cmd = command,
+		app = pane.app or M.ai_app_name(command),
 		focus = pane_focus(pane),
 	}
 end
 
---- Defaults AIMode would use with no config (relative form for storage).
---- Plain only: interactive terminal (empty cmd ready to fill) + Oil on the
---- layout folder for both columns. No frontend/sdl or prompts heuristics —
---- set paths / cmd / focus by hand in logarktos.lua when you want them.
---- `focus` is the basename of a file or folder in that Oil listing to land on
---- (empty = Oil's default cursor, usually `../`).
-function M.default_aimode(_base)
+local function stored_work_pane(pane, fallback_mode)
+	pane = type(pane) == "table" and pane or {}
+	local command = pane.command or pane.cmd
+	if type(command) ~= "string" then command = "" else command = vim.trim(command) end
+	local focus = pane.focus
+	if type(focus) ~= "string" then focus = "" end
+	local mode = M.normalize_mode(pane.mode)
+	if not mode then
+		mode = fallback_mode or ((command ~= "") and "terminal" or "oil")
+	end
 	return {
-		-- Terminal: keep `cmd = ""` so a CLI is one edit away (e.g. "grok --yolo").
-		left = { path = ".", cmd = "" },
-		center = { path = ".", focus = "" },
-		right = { path = ".", focus = "" },
+		mode = mode,
+		path = M.normalize_path_field(pane.path or pane.cwd),
+		command = command,
+		focus = focus,
+	}
+end
+
+--- New WorkMode shape: named left/center/right pane tables (not a list of terminals).
+local function is_new_work(w)
+	if type(w) ~= "table" then return false end
+	if type(w.center) == "table" and not is_list(w.center) then return true end
+	if type(w.right) == "table" and is_list(w.right) then return false end
+	if type(w.left) == "table" and not is_list(w.left) then return true end
+	if type(w.right) == "table" and not is_list(w.right) then return true end
+	return false
+end
+
+--- Rewrite leftover `aimode` / stacked-terminal `work` into the three-pane shape.
+--- Existing new-shape values are kept; `aimode` is dropped once `work` owns the panes.
+--- @return string[] notes describing what changed (empty if already current)
+function M.migrate_work_section(data, _dir)
+	if type(data) ~= "table" then return {} end
+	local notes = {}
+	local am = data.aimode
+	local w = data.work
+
+	if is_new_work(w) then
+		for _, slot in ipairs({ "left", "center", "right" }) do
+			local p = w[slot]
+			if type(p) == "table" then
+				if (p.command == nil or p.command == "")
+					and type(p.cmd) == "string" and vim.trim(p.cmd) ~= ""
+				then
+					p.command = vim.trim(p.cmd)
+					notes[#notes + 1] = slot .. ".cmd → command"
+				end
+				p.cmd = nil
+				if p.mode == nil then
+					local fallback = (slot == "left") and "terminal" or "oil"
+					if type(p.command) == "string" and p.command ~= "" then
+						fallback = "terminal"
+					end
+					p.mode = fallback
+					notes[#notes + 1] = slot .. ".mode"
+				end
+				if p.path == nil and p.cwd ~= nil then
+					p.path = p.cwd
+					notes[#notes + 1] = slot .. ".cwd → path"
+				end
+			end
+		end
+		if am ~= nil then
+			data.aimode = nil
+			notes[#notes + 1] = "removed leftover aimode (WorkMode now owns the three panes)"
+		end
+		return notes
+	end
+
+	if type(am) == "table" and next(am) then
+		data.work = {
+			left = stored_work_pane(am.left, "terminal"),
+			center = stored_work_pane(am.center, "oil"),
+			right = stored_work_pane(am.right, "oil"),
+		}
+		data.aimode = nil
+		notes[#notes + 1] = "migrated aimode → work"
+		return notes
+	end
+
+	if type(w) == "table" and next(w) then
+		data.work = M.default_work()
+		notes[#notes + 1] = "replaced stacked-terminal work with three-pane WorkMode"
+		return notes
+	end
+
+	return notes
+end
+
+--- Defaults WorkMode uses with no config (relative form for storage).
+--- Plain only: terminal left (empty command) + Oil on the layout folder for
+--- centre and right. No frontend/sdl or prompts heuristics — set mode / path /
+--- command / focus by hand when you want them.
+--- `path = "."` (or `"root"`) is the layout folder. `command` only fires when
+--- `mode` is `"terminal"`. `focus` is the Oil-entry basename to land on.
+function M.default_work_pane(mode)
+	return {
+		mode = mode or "oil",
+		path = ".",
+		command = "",
+		focus = "",
 	}
 end
 
 function M.default_work(_base)
 	return {
-		-- left omitted → keep current buffer
-		-- Terminals: empty cmd strings are ready to fill; blank → plain shell.
-		right = {
-			{ path = ".", cmd = "" }, -- top
-			{ path = ".", cmd = "" }, -- bottom
-		},
+		left = M.default_work_pane("terminal"),
+		center = M.default_work_pane("oil"),
+		right = M.default_work_pane("oil"),
 	}
+end
+
+--- @deprecated WorkMode absorbed AIMode; kept so older callers still load.
+function M.default_aimode(base)
+	return M.default_work(base)
 end
 
 --- Defaults for TextWork (space+tw): dual views of one file + Oil of its folder.
@@ -769,67 +890,23 @@ function M.default_textwork(_base)
 	}
 end
 
---- Ensure `aimode` exists in the folder's logarktos.lua; create/update file.
---- Fills any newly introduced nested keys (e.g. `focus` on Oil panes) without
---- overwriting existing values — same idea as :Logarktos / deep_fill_missing.
---- @return table resolved { left, center, right } with absolute paths/cmds
-function M.ensure_aimode(base)
-	base = util.normalize(base or vim.fn.getcwd())
-	local data = M.load_or_empty(base)
-	local path = M.path_in(base)
-	local file_missing = path and not util.exists(path)
-	local section_missing = type(data.aimode) ~= "table" or not next(data.aimode)
-	local filled = false
-	if section_missing then
-		data.aimode = M.default_aimode(base)
-	else
-		local added = deep_fill_missing(data.aimode, M.default_aimode(base))
-		filled = #added > 0
-	end
-	seed_organize_if_new_file(data, file_missing)
-	-- Brand-new files from this layout also get tabname / work / textwork, etc.
-	if #M.apply_folder_defaults(data, base) > 0 then
-		filled = true
-	end
-	if section_missing or file_missing or data._from_legacy or filled then
-		M.save_dir(base, data)
-		data._from_legacy = nil
-		if section_missing then
-			util.notify("Wrote aimode section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
-		elseif filled then
-			util.notify("Updated aimode section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
-		elseif file_missing then
-			util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
-		end
-	end
-	local am = data.aimode
-	return {
-		left = pane_spec(am.left, base),
-		center = pane_spec(am.center, base),
-		right = pane_spec(am.right, base),
-		data = data,
-	}
-end
-
---- Ensure `work` exists; return resolved left + right terminal specs.
---- When `work.left` is an Oil pane table, seed a missing `focus = ""` key.
+--- Ensure `work` exists in the folder's logarktos.lua; create/update file.
+--- Migrates leftover `aimode` / stacked-terminal `work` into the three-pane
+--- shape, then fills any missing nested keys without overwriting values.
+--- @return table resolved { left, center, right } with mode / absolute paths / command
 function M.ensure_work(base)
 	base = util.normalize(base or vim.fn.getcwd())
 	local data = M.load_or_empty(base)
 	local path = M.path_in(base)
 	local file_missing = path and not util.exists(path)
-	local section_missing = type(data.work) ~= "table" or not next(data.work)
-	local filled = false
+	local migrated = M.migrate_work_section(data, base)
+	local section_missing = type(data.work) ~= "table" or not next(data.work) or not is_new_work(data.work)
+	local filled = #migrated > 0
 	if section_missing then
 		data.work = M.default_work(base)
 	else
 		local added = deep_fill_missing(data.work, M.default_work(base))
-		filled = #added > 0
-		-- Optional left Oil pane is not in the default template; still seed focus.
-		if type(data.work.left) == "table" and data.work.left.focus == nil then
-			data.work.left.focus = ""
-			filled = true
-		end
+		filled = filled or #added > 0
 	end
 	seed_organize_if_new_file(data, file_missing)
 	if #M.apply_folder_defaults(data, base) > 0 then
@@ -838,7 +915,12 @@ function M.ensure_work(base)
 	if section_missing or file_missing or data._from_legacy or filled then
 		M.save_dir(base, data)
 		data._from_legacy = nil
-		if section_missing then
+		if #migrated > 0 then
+			util.notify(
+				"Updated " .. (path or "logarktos.lua") .. " — " .. table.concat(migrated, "; "),
+				vim.log.levels.INFO
+			)
+		elseif section_missing then
 			util.notify("Wrote work section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
 		elseif filled then
 			util.notify("Updated work section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
@@ -847,26 +929,17 @@ function M.ensure_work(base)
 		end
 	end
 	local w = data.work
-	local left = w.left and pane_spec(w.left, base) or nil
-	local right_entries = w.right
-	local top, bot
-	if type(right_entries) == "table" and is_list(right_entries) then
-		top = pane_spec(right_entries[1] or {}, base)
-		bot = pane_spec(right_entries[2] or right_entries[1] or {}, base)
-	elseif type(right_entries) == "table" then
-		-- single pane table reused for both
-		top = pane_spec(right_entries, base)
-		bot = pane_spec(right_entries, base)
-	else
-		top = { cwd = base, cmd = nil, app = nil, focus = nil }
-		bot = { cwd = base, cmd = nil, app = nil, focus = nil }
-	end
 	return {
-		left = left,
-		top = top,
-		bot = bot,
+		left = pane_spec(w.left, base, "terminal"),
+		center = pane_spec(w.center, base, "oil"),
+		right = pane_spec(w.right, base, "oil"),
 		data = data,
 	}
+end
+
+--- @deprecated WorkMode absorbed AIMode. Returns the same table as ensure_work.
+function M.ensure_aimode(base)
+	return M.ensure_work(base)
 end
 
 --- Ensure `textwork` exists; return resolved right-pane Oil focus.

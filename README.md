@@ -74,8 +74,8 @@ Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env var
 | `:LogarktosTriplicate [dir]` | Oil ┃ bookmarks ┃ recent files — the signature opening workspace |
 | `:LogarktosLarge` / `:LogarktosNewLarge` | wide editor flanked by narrow scratch buffers |
 | `:LogarktosFocus` | editor centred with empty side buffers |
-| `:LogarktosWork` / `:LogarktosHereWork` | editor plus two terminals (new tab / current tab) |
-| `:LogarktosAIMode` / `:AIMode` | terminal plus Oil columns (folder from Oil cursor / bookmark under cursor / file dir) |
+| `:LogarktosWork` / `:WorkMode` | three panes from the folder's `work` section (`terminal` / `oil` / `empty`) |
+| `:LogarktosHereWork` / `:HereWorkMode` | same WorkMode layout in the current tab |
 | `:LogarktosTextWork` / `:TextWork` | dual views of one file (start/end cursors) plus Oil of its folder |
 | `:LogarktosTriple` / `:LogarktosDual` | synchronized views of the same buffer |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
@@ -95,29 +95,23 @@ Two scopes share the same filename and Lua table format:
    tell you where to put it.
 
 2. **Project files** — `logarktos.lua` in any folder you open a layout from  
-   Holds `aimode` / `work` / `textwork` pane targets. **`:AIMode` /
-   `:LogarktosWork` / `:LogarktosHereWork` / `:TextWork`** ensure the matching
-   section exists: if the file or section is missing, it is written from the
-   **plain** first-run defaults (interactive terminal with no auto-start
-   command; Oil columns on the layout folder; Work’s two right terminals also
-   plain; TextWork’s right Oil focus empty = the dual-pane file). No special
-   folders (`frontend/sdl/`, etc.) are guessed — add those paths yourself when
-   you want them. Later runs read the file. Sections can also be added into an
-   existing user file when you run those layouts from the Neovim config folder.
+   Holds `work` / `textwork` pane targets. **`:WorkMode` / `:HereWorkMode` /
+   `:TextWork`** ensure the matching section exists: if the file or section is
+   missing, it is written from the **plain** first-run defaults (terminal left
+   with no auto-start command; Oil on the layout folder for centre and right;
+   TextWork’s right Oil focus empty = the dual-pane file). No special folders
+   (`frontend/sdl/`, `documents/prompts/`, etc.) are guessed — add those paths
+   yourself when you want them. Later runs read the file. Older `aimode` /
+   stacked-terminal `work` sections are migrated into the three-pane `work`
+   shape on first load.
 
 ```lua
--- What the plugin seeds on first use (plain defaults; cmd / focus ready to fill):
+-- What the plugin seeds on first use (plain defaults; command / focus ready to fill):
 return {
-  aimode = {
-    left = { path = ".", cmd = "" },           -- put e.g. "grok --yolo" in cmd
-    center = { path = ".", focus = "" },       -- Oil at the layout folder
-    right = { path = ".", focus = "" },
-  },
   work = {
-    right = {
-      { path = ".", cmd = "" },       -- top terminal
-      { path = ".", cmd = "" },       -- bottom terminal
-    },
+    left   = { mode = "terminal", path = ".", command = "" },
+    center = { mode = "oil",      path = ".", command = "", focus = "" },
+    right  = { mode = "oil",      path = ".", command = "", focus = "" },
   },
   textwork = {
     right = { focus = "" },           -- empty = land Oil on the dual-pane file
@@ -125,10 +119,19 @@ return {
 }
 ```
 
-**Oil `focus`:** on any Oil pane (`aimode.center` / `aimode.right`, optional
-`work.left`, TextWork’s right column, or Triple/Dual/Large path overrides),
-set `focus` to the **basename** of a file or folder in that listing so the
-cursor lands on it when the layout opens. Example:
+Each WorkMode pane has:
+
+- **`mode`**: `"terminal"`, `"oil"`, or `"empty"`.
+- **`path`**: folder for that pane. Relative to the layout folder, or absolute.
+  `"."`, `"root"`, empty, or omitted all mean the layout folder.
+- **`command`**: typed into the pane’s interactive shell when `mode` is
+  `"terminal"` (e.g. `"grok --yolo"`). Empty = plain shell. Ignored otherwise.
+- **`focus`**: Oil-entry basename to land on (oil panes only).
+
+**Oil `focus`:** on any Oil pane (`work.center` / `work.right` / `work.left`
+when that pane is oil, TextWork’s right column, or Triple/Dual/Large path
+overrides), set `focus` to the **basename** of a file or folder in that listing
+so the cursor lands on it when the layout opens. Example:
 
 ```lua
 right = {
@@ -139,10 +142,10 @@ right = {
 
 Empty or omitted `focus` leaves Oil's default cursor (usually `../`) — except
 **TextWork**, where empty means the dual-pane file’s basename.
-`:Logarktos` / first AIMode or TextWork run seeds missing `focus = ""` keys
+`:Logarktos` / first WorkMode or TextWork run seeds missing `focus = ""` keys
 without overwriting values you already set.
 
-Non-empty `cmd` values are typed into an interactive shell (the shell remains
+Non-empty `command` values are typed into an interactive shell (the shell remains
 the terminal job). Exiting the program (`/exit` in an AI CLI, etc.) returns
 you to that shell; the pane stays open and the layout does not collapse.
 
@@ -160,7 +163,7 @@ cmdlets stay available from `$PSHOME`) so grandchild 5.1 rebuilds Desktop
 defaults. Retrying the original command after the error is unsafe —
 installers may have already downloaded a payload.
 
-`:AIMode` / Work tabs pin a tab-local cwd (`:tcd`) to the layout folder, and
+WorkMode tabs pin a tab-local cwd (`:tcd`) to the layout folder, and
 each terminal pane pins a window-local cwd (`:lcd`) to that pane's folder.
 Splitting a pane (`Ctrl-W s`) therefore keeps the same directory, and
 `here_terminal` (space+ht) starts the new shell there — not in whatever
@@ -188,7 +191,7 @@ overrides folder names, Markdown headings, and AI CLI prefixes. Leave it empty
 or omit it to keep the automatic rules. Written files use one short comment
 line per known field.
 
-**AIMode / Work terminals:** when an AI CLI is running in a watched terminal
+**WorkMode terminals:** when an AI CLI is running in a watched terminal
 (`codex`, `grok`, `claude`, `agy`, …) — either auto-started from
 `logarktos.lua` or launched by hand — the tab title becomes `codex-<title>`
 (app name + the existing folder/title name). Skipped when `tabname` is set.
@@ -222,13 +225,14 @@ it files the current file — or the Oil entry / visual selection — into a
 - **Auto-backfill on read:** whenever an existing per-folder `logarktos.lua` is
   loaded (layouts, tab naming, organize, …), any standard keys introduced after
   that file was written are added automatically — same fill rules as
-  `:Logarktos` (`tabname`, `organize`, `aimode`, `work`, `textwork`, and nested
+  `:Logarktos` (`tabname`, `organize`, `work`, `textwork`, and nested
   defaults). Existing values are never overwritten. A short notice lists what
-  was added. Legacy `logarktos.env` is converted and filled on first read.
+  was added. Legacy `logarktos.env` / leftover `aimode` is converted and filled
+  on first read.
 - `:Logarktos` — refresh the current folder's `logarktos.lua` (Oil dir, then
   buffer dir, then cwd). Keeps every key already defined; adds any standard
-  categories/keys that are still missing (`tabname`, `organize`, `aimode`,
-  `work`, and nested defaults such as `organize.fixed`). Creates the file when
+  categories/keys that are still missing (`tabname`, `organize`, `work`,
+  and nested defaults such as `organize.fixed`). Creates the file when
   absent. Each known field is written with one short comment line above it.
   (Usually unnecessary now that loads backfill missing keys, but still useful
   to create a full template in a folder that has no file yet.)

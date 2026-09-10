@@ -3,8 +3,7 @@
 -- The conceptual layouts:
 --   • Large / NewLarge — a wide editor flanked by narrow scratch buffers.
 --   • Focus            — editor centred with empty side buffers.
---   • Work / HereWork  — editor plus two terminals.
---   • AIMode           — terminal + Oil columns (aimode section).
+--   • Work / HereWork  — three panes from logarktos.lua `work` (terminal / oil / empty).
 --   • TextWork         — dual views of one file + Oil of its folder (textwork).
 --   • Triple / Dual    — synchronized views of the same buffer.
 -- Every layout names its new tab from its *focus buffer* (see logarktos.tabs).
@@ -203,9 +202,9 @@ end
 
 -- ── layout builders ──────────────────────────────────────────────────────────
 --- Focus: *this* buffer (or bookmark/recent selection) in the middle, empty
---- sides. Never apply logarktos.lua pane paths — those belong to AIMode/Work/
+--- sides. Never apply logarktos.lua pane paths — those belong to WorkMode /
 --- Triple project layouts. An empty/unnamed buffer must stay empty; do not
---- fall through to Oil because cwd happens to have an aimode.center path.
+--- fall through to Oil because cwd happens to have a work.center path.
 function M.focus_mode_tab()
 	local source_buf = vim.api.nvim_get_current_buf()
 	local view = vim.fn.winsaveview()
@@ -403,92 +402,206 @@ local function ensure_ai_watch()
 	})
 end
 
---- Shared Work layout: editor on the left, two terminals stacked on the right.
---- Uses / seeds the folder's logarktos.lua `work` section (create on first run).
+local function open_empty_pane(win, cwd)
+	vim.api.nvim_set_current_win(win)
+	vim.cmd("enew")
+	vim.bo.bufhidden = "wipe"
+	vim.bo.swapfile = false
+	if cwd and cwd ~= "" then
+		pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd))
+	end
+end
+
+--- Fill `win` from a resolved WorkMode pane spec (`mode` / `cwd` / `command` / `focus`).
+local function apply_work_pane(win, spec)
+	spec = spec or {}
+	local mode = spec.mode or "oil"
+	local cwd = spec.cwd or spec.path
+	vim.api.nvim_set_current_win(win)
+	if mode == "terminal" then
+		ensure_ai_watch()
+		open_term(win, cwd, spec.command or spec.cmd, {
+			app = spec.app,
+			watch_ai = true,
+		})
+		return { kind = "terminal", win = win, app = spec.app }
+	end
+	if mode == "empty" then
+		open_empty_pane(win, cwd)
+		return { kind = "empty", win = win }
+	end
+	util.open_dir(cwd, { focus = spec.focus })
+	if cwd and cwd ~= "" then
+		pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd))
+	end
+	return { kind = "oil", win = win }
+end
+
+local function three_column_windows()
+	local mid = vim.api.nvim_get_current_win()
+	vim.cmd("leftabove vnew")
+	local left = vim.api.nvim_get_current_win()
+	vim.api.nvim_set_current_win(mid)
+	vim.cmd("rightbelow vnew")
+	local right = vim.api.nvim_get_current_win()
+	return left, mid, right
+end
+
+--- Same proportions the old AIMode used: left + centre share a wide third,
+--- right takes the remainder (so it ends up the narrowest of the three).
+local function apply_work_widths(left, mid, _right)
+	local wide = math.floor(vim.o.columns / 3) + 10
+	if vim.api.nvim_win_is_valid(left) then
+		vim.api.nvim_win_set_width(left, wide)
+	end
+	if vim.api.nvim_win_is_valid(mid) then
+		vim.api.nvim_win_set_width(mid, wide)
+	end
+end
+
+local function first_work_app(work)
+	for _, slot in ipairs({ "left", "center", "right" }) do
+		local spec = work and work[slot]
+		if spec and spec.app then return spec.app end
+	end
+	return nil
+end
+
+local function name_work_tab(base, work)
+	if tabs.apply_from_rcfile(base) then return end
+	local folder = util.project_or_dir_name(base)
+	if folder and folder ~= "" then tabs.apply_folder(folder) end
+	local app = first_work_app(work)
+	if app then tabs.apply_ai_app(app) end
+end
+
+--- Shared WorkMode layout: three columns from the folder's `work` section
+--- (create / migrate on first run). Each pane is terminal, oil, or empty.
 local function build_work_layout(opts)
 	opts = opts or {}
 	local buf = vim.api.nvim_get_current_buf()
 	local cwd = util.resolve_cwd(buf)
 	local base = cwd or vim.fn.getcwd()
 	local work = rcfile.ensure_work(base)
-	local view = vim.fn.winsaveview()
 
-	if opts.new_tab then
+	if opts.new_tab ~= false then
 		vim.cmd("tabnew")
-		-- Tab-local cwd: every new split in this Work tab inherits the folder
-		-- unless a pane pins its own lcd (Oil / open_term).
-		if cwd then pcall(vim.cmd, "tcd " .. vim.fn.fnameescape(cwd)) end
 	else
 		vim.cmd("only")
 	end
+	-- Tab-local cwd: Ctrl-W s / tabnew from this WorkMode tab share the layout
+	-- folder. Oil panes then lcd to their own listing; terminals lcd to their path.
+	pcall(vim.cmd, "tcd " .. vim.fn.fnameescape(base))
 
-	local left_win = vim.api.nvim_get_current_win()
-	if opts.new_tab then
-		-- Default: keep the source buffer. From a bookmark/recent list, open the
-		-- selected path (Oil for folders, :edit for files) instead of cloning the list.
-		util.open_focus_or_buf(buf, view)
-	elseif util.is_list_panel(buf) then
-		-- HereWork: still replace a list panel with the selection in-place.
-		util.open_focus_or_buf(buf, view)
+	local left, mid, right = three_column_windows()
+	local applied = {
+		left = apply_work_pane(left, work.left),
+		center = apply_work_pane(mid, work.center),
+		right = apply_work_pane(right, work.right),
+	}
+	apply_work_widths(left, mid, right)
+
+	local focus_win = mid
+	local focus_insert = false
+	for _, slot in ipairs({ "left", "center", "right" }) do
+		if applied[slot].kind == "terminal" then
+			focus_win = applied[slot].win
+			focus_insert = true
+			break
+		end
 	end
-	if cwd then pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd)) end
-
-	-- Optional left path: open Oil there instead of the source buffer.
-	if work.left and work.left.path then
-		vim.api.nvim_set_current_win(left_win)
-		util.open_dir(work.left.path, { focus = work.left.focus })
-	end
-
-	vim.cmd("rightbelow vsplit")
-	vim.cmd("rightbelow vsplit")
-	local rt = vim.api.nvim_get_current_win()
-	vim.cmd("belowright split")
-	local rb = vim.api.nvim_get_current_win()
-
-	local top_spec = work.top or { cwd = base, cmd = nil, app = nil }
-	local bot_spec = work.bot or { cwd = base, cmd = nil, app = nil }
-
-	ensure_ai_watch()
-	open_term(rt, top_spec.cwd, top_spec.cmd, { app = top_spec.app, watch_ai = true })
-	open_term(rb, bot_spec.cwd, bot_spec.cmd, { app = bot_spec.app, watch_ai = true })
-	vim.api.nvim_set_current_win(left_win)
-	vim.cmd("wincmd =")
 
 	return {
 		buf = buf,
 		cwd = cwd,
 		base = base,
-		top_app = top_spec.app,
-		bot_app = bot_spec.app,
+		work = work,
+		wins = { left = left, center = mid, right = right },
+		applied = applied,
+		focus_win = focus_win,
+		focus_insert = focus_insert,
+		app = first_work_app(work),
 	}
 end
 
-function M.work_mode_tab()
-	local info = build_work_layout({ new_tab = true })
-	-- Name from the left pane after open (bookmark list → Oil/file, not the list).
-	local left_buf = vim.api.nvim_get_current_buf()
-	name_layout_tab(left_buf, { layout = "work", dir = info.cwd })
-	-- Prefer the top terminal's AI app for the tab label when auto-started.
-	local app = info.top_app or info.bot_app
-	if app then tabs.apply_ai_app(app) end
+local function finish_work_layout(info)
+	name_work_tab(info.base, info.work)
+	vim.schedule(function()
+		if vim.api.nvim_win_is_valid(info.focus_win) then
+			vim.api.nvim_set_current_win(info.focus_win)
+			if info.focus_insert then vim.cmd("startinsert") end
+		end
+	end)
 	announce_layout_built()
 end
 
+function M.work_mode_tab()
+	finish_work_layout(build_work_layout({ new_tab = true }))
+end
+
 function M.here_work_mode()
-	local info = build_work_layout({ new_tab = false })
-	-- HereWork transforms the current tab in place, so it must (re)name it from
-	-- the buffer we started on. logarktos.lua `tabname` wins when set; else
-	-- prefer the git-aware project-root name (so a deep file or an Oil listing
-	-- inside RunningWild/ names the tab "RunningWild"), falling back to the
-	-- plain folder name when we're not inside a project.
-	local cwd = info.cwd or vim.fn.getcwd()
-	if not tabs.apply_from_rcfile(cwd) then
-		local folder = util.project_or_dir_name(cwd)
-		if folder and folder ~= "" then tabs.apply_folder(folder) end
-		local app = info.top_app or info.bot_app
-		if app then tabs.apply_ai_app(app) end
+	finish_work_layout(build_work_layout({ new_tab = false }))
+end
+
+--- @deprecated WorkMode absorbed AIMode.
+function M.ai_mode_tab()
+	return M.work_mode_tab()
+end
+
+--- Parse `"center,right"` / `{ "center", "right" }` into a slot list.
+local function parse_work_slots(slots)
+	if type(slots) == "string" then
+		local list = {}
+		for s in slots:gmatch("[^,]+") do
+			s = vim.trim(s)
+			if s ~= "" then list[#list + 1] = s end
+		end
+		slots = list
 	end
+	if type(slots) ~= "table" then return {} end
+	local out = {}
+	for _, s in ipairs(slots) do
+		if s == "left" or s == "center" or s == "right" then
+			out[#out + 1] = s
+		end
+	end
+	return out
+end
+
+--- Build only the given WorkMode slots as columns in the *current* tab.
+--- Used by WezMode: the terminal slots live in sibling WezTerm panes, so this
+--- Neovim only owns the oil/empty ones. Returns `{ wins, slots, work }` or nil.
+--- @param base string layout folder
+--- @param slots string[]|string
+function M.build_work_slots(base, slots)
+	slots = parse_work_slots(slots)
+	if #slots == 0 then return nil end
+	base = util.normalize(base or vim.fn.getcwd())
+	local work = rcfile.ensure_work(base)
+	pcall(vim.cmd, "tcd " .. vim.fn.fnameescape(base))
+
+	local wins = { vim.api.nvim_get_current_win() }
+	for _ = 2, #slots do
+		vim.cmd("rightbelow vnew")
+		wins[#wins + 1] = vim.api.nvim_get_current_win()
+	end
+	for i, slot in ipairs(slots) do
+		apply_work_pane(wins[i], work[slot])
+	end
+
+	if #slots == 2 and slots[1] == "center" and slots[2] == "right" then
+		-- Same ~30-column gap WezMode used when it owned AIMode's two Oil columns.
+		if vim.api.nvim_win_is_valid(wins[1]) then
+			vim.api.nvim_win_set_width(wins[1], math.floor((vim.o.columns + 30) / 2))
+		end
+	elseif #slots >= 2 then
+		vim.cmd("wincmd =")
+	end
+
+	name_work_tab(base, work)
+	vim.api.nvim_set_current_win(wins[1])
 	announce_layout_built()
+	return { wins = wins, slots = slots, work = work }
 end
 
 --- Open `dir` in Oil in the current window; else the focus path of `buf`
@@ -566,7 +679,7 @@ function M.large_mode_tab()
 	local env = load_env(base)
 	-- Optional side-pane path overrides only; centre is always the focus buffer
 	-- (or bookmark/recent selection). Never replace centre with env.center —
-	-- that used to open Oil from aimode when the buffer was empty/unnamed.
+	-- that used to open Oil from work.center when the buffer was empty/unnamed.
 	local left_dir = env and envfile.first_path(env.left) or nil
 	local right_dir = env and envfile.first_path(env.right) or nil
 	local left_focus = env and envfile.first_focus(env.left) or nil
@@ -630,78 +743,6 @@ function M.new_large_tab()
 	announce_layout_built()
 end
 
---- AI mode: three columns. Left = terminal (optional command), centre / right =
---- Oil. Pane targets come from the folder's logarktos.lua `aimode` section;
---- when that section is missing it is created as plain defaults (interactive
---- terminal + Oil on the layout folder for both columns — no path heuristics).
---- Oil panes honour optional `focus` (basename of a file/folder to land on).
---- Base folder: Oil directory entry under the cursor (or Oil listing / `../`),
---- bookmark under the cursor, file buffer parent, else cwd.
-function M.ai_mode_tab()
-	local cwd = util.resolve_cwd(vim.api.nvim_get_current_buf())
-	local base = cwd or vim.fn.getcwd()
-	local am = rcfile.ensure_aimode(base)
-
-	local left_spec = am.left or { cwd = base, cmd = nil, app = nil }
-	local center_dir = (am.center and am.center.path) or base
-	local right_dir = (am.right and am.right.path) or base
-	local center_focus = am.center and am.center.focus or nil
-	local right_focus = am.right and am.right.focus or nil
-
-	vim.cmd("tabnew")
-	-- Tab-local cwd: Ctrl-W s / tabnew from this AIMode tab share the layout
-	-- folder. Oil panes then lcd to their own listing; the terminal lcds to
-	-- left.cwd (usually the same). Without this, the tab keeps Neovim's
-	-- launch directory and space+ht opens a shell there.
-	pcall(vim.cmd, "tcd " .. vim.fn.fnameescape(base))
-	local mid = vim.api.nvim_get_current_win()
-	vim.cmd("leftabove vnew")
-	local left = vim.api.nvim_get_current_win()
-	vim.api.nvim_set_current_win(mid)
-	vim.cmd("rightbelow vnew") -- the third (right) column
-	local right = vim.api.nvim_get_current_win()
-
-	vim.api.nvim_set_current_win(mid)
-	util.open_dir(center_dir, { focus = center_focus })
-	vim.api.nvim_set_current_win(right)
-	util.open_dir(right_dir, { focus = right_focus })
-
-	ensure_ai_watch()
-	open_term(left, left_spec.cwd or base, left_spec.cmd, {
-		app = left_spec.app,
-		watch_ai = true,
-	})
-
-	-- The terminal and centre columns share the same width (an even third plus
-	-- one right-arrow width-step, "+10"); the right Oil column takes whatever is
-	-- left, so it ends up the narrowest of the three.
-	local wide = math.floor(vim.o.columns / 3) + 10
-	vim.api.nvim_win_set_width(left, wide)
-	vim.api.nvim_win_set_width(mid, wide)
-
-	-- Name the tab: logarktos.lua `tabname` overrides everything when set;
-	-- else the same git-aware folder name HereWork uses, optionally prefixed
-	-- with an auto-started AI CLI (codex-Title).
-	if not tabs.apply_from_rcfile(base) then
-		local folder = util.project_or_dir_name(base)
-		if folder and folder ~= "" then tabs.apply_folder(folder) end
-		if left_spec.app then tabs.apply_ai_app(left_spec.app) end
-	end
-
-	-- Land in the terminal, ready to type. Deferred so the layout has settled
-	-- before we enter Terminal-Job (insert) mode.
-	vim.schedule(function()
-		if vim.api.nvim_win_is_valid(left) then
-			vim.api.nvim_set_current_win(left)
-			vim.cmd("startinsert")
-		end
-	end)
-
-	-- Queued after the focus schedule above (FIFO), so the spotlight refresh it
-	-- triggers reads the terminal as the active window, not the centre Oil pane.
-	announce_layout_built()
-end
-
 --- Resolve a concrete file path for TextWork: bookmark/recent selection, Oil
 --- entry under the cursor, or the current file buffer. Directories alone are
 --- not enough — the layout needs a dual-pane file.
@@ -742,7 +783,7 @@ local function resolve_text_file(buf)
 	return nil
 end
 
---- TextWork: three columns sized like AI Mode (left + centre wide, right
+--- TextWork: three columns sized like WorkMode (left + centre wide, right
 --- narrower). Left and centre show the same file (left at first line / first
 --- char; centre at last line / first char, and focus lands there). Right is
 --- Oil on the file's parent folder, cursor on that file by default.
@@ -788,7 +829,7 @@ function M.text_work_mode_tab()
 	local right = vim.api.nvim_get_current_win()
 	util.open_dir(parent, { focus = oil_focus })
 
-	-- Same column widths as AI Mode: left + centre share a wide third; right is narrower.
+	-- Same column widths as WorkMode: left + centre share a wide third; right is narrower.
 	local wide = math.floor(vim.o.columns / 3) + 10
 	if vim.api.nvim_win_is_valid(left) then
 		vim.api.nvim_win_set_width(left, wide)
@@ -821,7 +862,7 @@ end
 -- Re-even the current tab's columns after they've drifted out of shape.
 --   • two columns      → equal halves
 --   • three columns    → equal thirds (Triple/Triplicate proportions)
---   • a column Work mode split in two → its stacked halves balanced too
+--   • a column split in two → its stacked halves balanced too
 -- :wincmd = equalises every window regardless of 'equalalways', so it restores
 -- even columns and rebalances any vertical split without flattening it.
 function M.fix_layout()

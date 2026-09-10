@@ -54,20 +54,21 @@ local function entries_from_pane(pane, base)
 			out[#out + 1] = { kind = "path", path = abs, focus = focus }
 		end
 	end
-	if pane.cmd and pane.cmd ~= "" then
-		out[#out + 1] = { kind = "cmd", cmd = pane.cmd, app = M.ai_app_name(pane.cmd) }
+	local command = pane.command or pane.cmd
+	if command and command ~= "" then
+		out[#out + 1] = { kind = "cmd", cmd = command, app = M.ai_app_name(command) }
 	end
 	return out
 end
 
---- Load optional path overrides for non-AIMode/Work layouts (Triple, Dual,
+--- Load optional path overrides for non-WorkMode layouts (Triple, Dual,
 --- Large sides, NewLarge). Only explicit layout paths count:
 ---   • `paths = { left, center, right }`
 ---   • or top-level `left` / `center` / `right`
---- `aimode` is intentionally ignored here — it is for :AIMode only. Treating
---- aimode as a general layout override made Focus/Large/Triple open Oil at
---- aimode.center whenever cwd had a logarktos.lua (including empty buffers
---- whose cwd fell back to a folder that once ran AIMode).
+--- `work` (and leftover `aimode`) is intentionally ignored here — it is for
+--- :WorkMode only. Treating those sections as a general layout override made
+--- Focus/Large/Triple open Oil at work.center whenever cwd had a logarktos.lua
+--- (including empty buffers whose cwd fell back to a folder that once ran WorkMode).
 function M.load(dir)
 	if not dir or dir == "" then return nil end
 	local data = rcfile.load_dir(dir)

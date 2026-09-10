@@ -68,7 +68,7 @@ function M.terminal_cwd(buf)
 end
 
 --- Directory a "here" terminal (space+ht / space+wt) should start in.
---- Window/tab `lcd`/`tcd` first (so a split of an AIMode pane keeps that
+--- Window/tab `lcd`/`tcd` first (so a split of a WorkMode pane keeps that
 --- pane's folder), then the current terminal's own cwd, then Oil listing /
 --- file parent. Capture this *before* replacing the buffer — a fresh empty
 --- buffer has no path of its own.
@@ -107,7 +107,7 @@ end
 --- The old buffer stays open in any other window still showing it.
 ---
 --- When `opts.cwd` is omitted, the new shell starts in the invoking window's
---- active directory (AIMode/Work `lcd`/`tcd`, the terminal being replaced, Oil
+--- active directory (WorkMode `lcd`/`tcd`, the terminal being replaced, Oil
 --- listing, or the file's parent) — never Neovim's launch cwd by accident.
 --- @param opts? { vsplit?: boolean, split?: boolean, cwd?: string, startinsert?: boolean }
 function M.open_interactive_terminal(opts)

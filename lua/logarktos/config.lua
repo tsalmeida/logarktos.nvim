@@ -17,6 +17,7 @@ M.default_keymaps = {
 	text_work           = "<leader>tw",
 	triple              = "<leader>tm",
 	dual                = "<leader>dm",
+	dual_wide           = "<leader>dw",
 	focus               = "<leader>fm",
 	focus_toggle        = "<leader>fo",
 	fix_layout          = "<leader>fl",

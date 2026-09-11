@@ -6,6 +6,7 @@
 --   • Work / HereWork  — three panes from logarktos.lua `work` (terminal / oil / empty).
 --   • TextWork         — dual views of one file + Oil of its folder (textwork).
 --   • Triple / Dual    — synchronized views of the same buffer.
+--   • DualWide         — Dual, with three narrow scratch panes for wide screens.
 -- Every layout names its new tab from its *focus buffer* (see logarktos.tabs).
 
 local config = require("logarktos.config")
@@ -669,6 +670,81 @@ function M.dual_mode_tab()
 	vim.cmd("wincmd =")
 
 	name_layout_tab(vim.api.nvim_win_get_buf(left), { layout = "dual", dir = cwd })
+	announce_layout_built()
+end
+
+--- DualWide keeps DualMode's two working panes but gives a very wide display
+--- three deliberately narrow scratch buffers: one on each outer edge and one
+--- between the working panes.  It is intentionally a separate command rather
+--- than geometry detection: the person using Neovim decides when the monitor
+--- is wide enough to benefit from the extra writing space.
+function M.dual_wide_mode_tab()
+	-- Capture the source before creating a tab or any splits.  In particular,
+	-- an Oil/list-panel selection must be resolved while its own window is
+	-- current; open_pane_dir_or_buf then preserves DualMode's exact behaviour.
+	local buf = vim.api.nvim_get_current_buf()
+	local cwd = util.resolve_cwd(buf)
+	local base = cwd or vim.fn.getcwd()
+	local env = load_env(base)
+	local left_dir = env and envfile.first_path(env.left) or nil
+	local right_dir = env and envfile.first_path(env.right) or nil
+	local left_focus = env and envfile.first_focus(env.left) or nil
+	local right_focus = env and envfile.first_focus(env.right) or nil
+	local view = vim.fn.winsaveview()
+
+	vim.cmd("tabnew")
+	local work_left = vim.api.nvim_get_current_win()
+	open_pane_dir_or_buf(left_dir, buf, view, left_focus)
+
+	-- Build left scratch | work left | middle scratch | work right | right
+	-- scratch.  Splitting work_left before work_right places the middle scratch
+	-- between the two real panes instead of relying on 'splitright'.
+	vim.api.nvim_set_current_win(work_left)
+	vim.cmd("leftabove vnew")
+	local scratch_left = vim.api.nvim_get_current_win()
+	open_empty_pane(scratch_left, cwd)
+
+	vim.api.nvim_set_current_win(work_left)
+	vim.cmd("rightbelow vsplit")
+	local work_right = vim.api.nvim_get_current_win()
+	open_pane_dir_or_buf(right_dir, buf, view, right_focus)
+
+	vim.api.nvim_set_current_win(work_left)
+	vim.cmd("rightbelow vnew")
+	local scratch_middle = vim.api.nvim_get_current_win()
+	open_empty_pane(scratch_middle, cwd)
+
+	vim.api.nvim_set_current_win(work_right)
+	vim.cmd("rightbelow vnew")
+	local scratch_right = vim.api.nvim_get_current_win()
+	open_empty_pane(scratch_right, cwd)
+
+	-- Make the three scratch buffers much narrower than the two working panes.
+	-- The window minimum remains authoritative on small terminals; DualWide is
+	-- selected explicitly for wide screens, so no automatic screen heuristic is
+	-- involved.
+	local narrow = math.max(vim.o.winminwidth, math.floor(vim.o.columns * 0.10))
+	for _, win in ipairs({ scratch_left, scratch_middle, scratch_right }) do
+		if vim.api.nvim_win_is_valid(win) then
+			vim.api.nvim_win_set_width(win, narrow)
+		end
+	end
+
+	-- Every scratch buffer belongs to the folder that launched DualWide, even
+	-- when the current tab inherited another local cwd.
+	if cwd then
+		for _, win in ipairs({ scratch_left, work_left, scratch_middle, work_right, scratch_right }) do
+			if vim.api.nvim_win_is_valid(win) then
+				vim.api.nvim_win_call(win, function()
+					pcall(vim.cmd, "lcd " .. vim.fn.fnameescape(cwd))
+				end)
+			end
+		end
+		vim.t.pwd_mode = "local"
+	end
+
+	vim.api.nvim_set_current_win(work_left)
+	name_layout_tab(vim.api.nvim_win_get_buf(work_left), { layout = "dual_wide", dir = cwd })
 	announce_layout_built()
 end
 

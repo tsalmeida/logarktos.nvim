@@ -78,6 +78,7 @@ Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env var
 | `:LogarktosHereWork` / `:HereWorkMode` | same WorkMode layout in the current tab |
 | `:LogarktosTextWork` / `:TextWork` | dual views of one file (start/end cursors) plus Oil of its folder |
 | `:LogarktosTriple` / `:LogarktosDual` | synchronized views of the same buffer |
+| `:LogarktosDualWide` | Dual with three narrow scratch buffers (left edge, centre, right edge) for wide screens |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
 | `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |
 | `:LogarktosSendToAI` | send selection/buffer to OpenAI (needs `ai.enabled` + API key) |

@@ -268,6 +268,7 @@ function M.name_for_layout(kind)
 		focus = "Focus",
 		large = "Large",
 		dual = "Dual",
+		dual_wide = "DualWide",
 		triple = "Triple",
 		oil = "Oil",
 	}

@@ -43,6 +43,7 @@ local function specs()
 		{ "TextWork", "TextWork", function() layouts().text_work_mode_tab() end, { desc = "TextWork layout (dual file views + Oil of file folder)" } },
 		{ "Triple", nil, function() layouts().triple_mode_tab() end, { desc = "Triple synced views" } },
 		{ "Dual", nil, function() layouts().dual_mode_tab() end, { desc = "Dual synced views" } },
+		{ "DualWide", nil, function() layouts().dual_wide_mode_tab() end, { desc = "Dual synced views with three narrow scratch panes" } },
 		{ "Focus", nil, function() layouts().focus_mode_tab() end, { desc = "Focus layout (centred editor)" } },
 		{ "FocusToggle", nil, function() layouts().focus_toggle() end, { desc = "Toggle inactive-window dimming" } },
 		{ "FixLayout", "FixLayout", function() layouts().fix_layout() end, { desc = "Even out the current tab's columns" } },

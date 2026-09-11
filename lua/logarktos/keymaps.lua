@@ -33,6 +33,7 @@ local function actions()
 		text_work           = { "n", function() L().text_work_mode_tab() end, "TextWork layout (dual file + Oil)" },
 		triple              = { "n", function() L().triple_mode_tab() end, "Triple synced views" },
 		dual                = { "n", function() L().dual_mode_tab() end, "Dual synced views" },
+		dual_wide           = { "n", function() L().dual_wide_mode_tab() end, "DualWide (two views + 3 scratch panes)" },
 		focus               = { "n", function() L().focus_mode_tab() end, "Focus layout" },
 		focus_toggle        = { "n", function() L().focus_toggle() end, "Toggle inactive dimming" },
 		fix_layout          = { "n", function() L().fix_layout() end, "Fix layout (even columns)" },

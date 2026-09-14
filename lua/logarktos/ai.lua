@@ -70,8 +70,10 @@ end
 --- Drop every buffer line that exactly matches a (non-blank) template line.
 --- Returns the kept lines and how many were removed.
 local function strip_template(lines, template_path)
-	local ok, tmpl = pcall(vim.fn.readfile, template_path)
-	if not ok or #tmpl == 0 then return lines, 0 end
+	-- Expanded the same way :NewMarkdown expanded it, so text pulled in from a
+	-- shared file by an include line counts as boilerplate too.
+	local tmpl = require("logarktos.template").read(template_path)
+	if not tmpl or #tmpl == 0 then return lines, 0 end
 	local tmpl_set = {}
 	for _, l in ipairs(tmpl) do
 		local key = vim.trim(l)

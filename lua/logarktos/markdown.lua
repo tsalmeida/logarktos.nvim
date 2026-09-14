@@ -208,8 +208,13 @@ function M.new_markdown(opts)
 		local contents, used_template = {}, false
 		local focus -- { row = <1-based line>, col = <0-based byte col> } once found
 		if template_name ~= "" and uv.fs_stat(template_path) then
-			local ok_read, lines = pcall(vim.fn.readfile, template_path)
-			if ok_read then
+			-- Include lines are expanded first, so the title, date and focus
+			-- markers below see (and place the cursor in) the finished text.
+			local lines, problems = require("logarktos.template").read(template_path)
+			if #problems > 0 then
+				util.notify("Template include: " .. table.concat(problems, "; "), vim.log.levels.WARN, "NewMarkdown")
+			end
+			if lines then
 				contents, used_template = lines, true
 				if title ~= "" then
 					for i, line in ipairs(contents) do

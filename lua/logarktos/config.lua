@@ -137,6 +137,11 @@ M.defaults = {
 		-- (asterisks stripped). Processed before the focus marker so a
 		-- shared line still lands the cursor at the right column.
 		date_marker = "*YYYYMMDD*",
+		-- A template line holding only this marker and a quoted path, e.g.
+		--   *include_attachment* "L:/Vault/Documents/Others/Logarktos-briefing.md"
+		-- is replaced by that file's contents when a note is created. Includes
+		-- are expanded before the markers above. Empty = no includes.
+		include_marker = "*include_attachment*",
 	},
 
 	organize = {

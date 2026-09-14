@@ -212,6 +212,20 @@ if the template contains the focus marker `*template_focus*` (configurable via
 `markdown.focus_marker`) it is stripped and the cursor lands there in insert
 mode with the line centred. Without a template the behaviour is unchanged — in
 Oil you simply land on the new file.
+
+A template line that holds only the include marker and a quoted path —
+`*include_attachment* "L:/Vault/Documents/Others/Logarktos-briefing.md"` — is
+replaced by that file's contents when the note is created, so text that many
+templates share lives in one file instead of a copy in each. The path may be
+absolute, relative to the template's folder, or use `%VAR%`, `$VAR` or `~`, and
+an included file may include others. Includes are expanded before the other
+markers, so included text can carry `*YYYYMMDD*` or the focus marker. A line
+whose file cannot be read stays in the note as written and a warning names it.
+The marker is `markdown.include_marker` (an empty string turns includes off);
+the marker only counts at the start of a line, so a sentence that mentions it
+is left alone. `:LogarktosSuggestFilename` treats included text as template
+boilerplate too.
+
 `:LogarktosMarkdownArchive` tucks the current file, unchanged, into an
 `archive/` subfolder, then drops you into a refreshed Oil view of the original
 folder so the file disappears from the listing. From an Oil buffer it can also

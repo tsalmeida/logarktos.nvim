@@ -1,38 +1,31 @@
--- logarktos/rcfile.lua ── load / save `logarktos.lua` (user + per-folder)
+-- logarktos/rcfile.lua ── load / save logarktos settings
 --
--- Per-folder files describe layout panes (work / textwork). The file at
--- stdpath("config")/logarktos.lua is that folder's file and the user file:
--- start_dir, ignore_dirs, bufferfiles, ai, bookmarks, plus the layout
--- sections. API keys stay in the environment or a gitignored `.env`.
+-- Two files:
+--   stdpath("config")/logarktos-config.lua — user settings (this machine):
+--     start_dir, ignore_dirs, bufferfiles, ai, bookmarks.
+--   <folder>/logarktos.lua — that folder's layout (tabname, organize, work,
+--     textwork), including the Neovim config folder.
+-- API keys stay in the environment or a gitignored `.env`.
 --
--- A missing user file is rewritten with those defaults on setup and on any
--- read of the config directory. Personal bookmarks and paths are not
--- restored. Layout commands cannot leave a folder-only file at that path.
---
--- Example (user / nvim config root):
---   return {
---     tabname = "",  -- e.g. "NVIM-Config" to name tabs opened on this folder
---     start_dir = "L:/Vault/",
---     ignore_dirs = { ".git", "node_modules" },
---     bufferfiles = { dir = "C:/…/bufferfiles/" },
---     ai = { model = "gpt-5-mini", max_input_chars = 1000, default_instruction = "…" },
---     bookmarks = { "C:/path/to/file" },
---     work = {
---       left   = { mode = "terminal", path = ".", command = "" },
---       center = { mode = "oil",      path = ".", command = "", focus = "" },
---       right  = { mode = "oil",      path = ".", command = "", focus = "" },
---     },
---     textwork = {
---       right = { focus = "" },
---     },
---   }
+-- If logarktos-config.lua is missing, it is created from any user keys still
+-- in the config folder's logarktos.lua, and those keys are then removed from
+-- the folder file. No folder file (a new machine) gets defaults. Personal
+-- bookmarks and paths are not invented. A file that does not load is left
+-- unchanged.
 
 local util = require("logarktos.util")
 
 local M = {}
 
 M.FILENAME = "logarktos.lua"
+M.CONFIG_FILENAME = "logarktos-config.lua"
 M.LEGACY_ENV = "logarktos.env"
+
+--- Keys that belong in logarktos-config.lua, not in a folder logarktos.lua.
+local USER_KEYS = { "start_dir", "ignore_dirs", "bufferfiles", "ai", "bookmarks" }
+
+local FOLDER_HEADER = "-- logarktos.lua — project settings for logarktos.nvim"
+local USER_HEADER = "-- logarktos-config.lua — user settings for logarktos.nvim"
 
 --- Known AI CLI app names (tab prefix + command detection).
 M.AI_APPS = {
@@ -49,33 +42,12 @@ M.AI_APPS = {
 -- ── path helpers ─────────────────────────────────────────────────────────────
 
 function M.user_path()
-	return util.join(vim.fn.stdpath("config"), M.FILENAME)
+	return util.join(vim.fn.stdpath("config"), M.CONFIG_FILENAME)
 end
 
 function M.path_in(dir)
 	if not dir or dir == "" then return nil end
 	return util.join(dir, M.FILENAME)
-end
-
---- Same directory, ignoring trailing slashes and Windows case.
-local function same_dir(a, b)
-	if type(a) ~= "string" or a == "" or type(b) ~= "string" or b == "" then
-		return false
-	end
-	local function norm(p)
-		p = util.normalize(p)
-		return (p:gsub("[/\\]+$", ""))
-	end
-	local x, y = norm(a), norm(b)
-	if vim.fn.has("win32") == 1 then
-		return x:lower() == y:lower()
-	end
-	return x == y
-end
-
---- True when `dir` is stdpath("config"). That path is both the user file and a folder file.
-function M.is_user_dir(dir)
-	return same_dir(dir, vim.fn.stdpath("config"))
 end
 
 --- Load `path` as a Lua table without notifying. nil when missing, unloadable, or not a table.
@@ -319,10 +291,10 @@ local function serialize_value(val, indent, path)
 	return "{\n" .. table.concat(parts, "\n") .. "\n" .. pad .. "}"
 end
 
-function M.serialize(data)
+function M.serialize(data, header)
 	local body = serialize_value(data or {}, 0, "")
 	return table.concat({
-		"-- logarktos.lua — project / user settings for logarktos.nvim",
+		header or FOLDER_HEADER,
 		"",
 		"return " .. body,
 		"",
@@ -347,11 +319,11 @@ function M.load_file(path)
 	return data
 end
 
-function M.save_file(path, data)
+function M.save_file(path, data, header)
 	if not path or path == "" then return false end
 	local dir = vim.fn.fnamemodify(path, ":h")
 	if dir and dir ~= "" then util.ensure_dir(dir) end
-	local text = M.serialize(data)
+	local text = M.serialize(data, header)
 	local ok, write_err = pcall(vim.fn.writefile, vim.split(text, "\n", { plain = true }), path)
 	if not ok then
 		util.notify("Could not write " .. path .. ": " .. tostring(write_err), vim.log.levels.ERROR)
@@ -388,17 +360,6 @@ function M.load_dir(dir)
 			return converted
 		end
 	end
-	-- Missing user file: write user defaults plus this folder's sections
-	-- before a layout command can create a folder-only file at the same path.
-	-- An existing file that failed to load is left untouched.
-	if not util.exists(path) and M.is_user_dir(dir) then
-		local user = M.ensure_user()
-		if type(user) == "table" then
-			user._path = path
-			user._dir = dir
-			return user
-		end
-	end
 	return nil
 end
 
@@ -410,18 +371,6 @@ end
 function M.save_dir(dir, data)
 	local path = M.path_in(dir)
 	if not path or type(data) ~= "table" then return false end
-	-- Never replace an unloadable user file with defaults (that would drop bookmarks).
-	if M.is_user_dir(dir) and util.exists(path) and not load_table_silent(path) then
-		util.notify(
-			"Left " .. path .. " unchanged because it did not load.",
-			vim.log.levels.ERROR
-		)
-		return false
-	end
-	-- A folder save of the config directory must keep the user-file keys.
-	if M.is_user_dir(dir) then
-		M.apply_user_defaults(data)
-	end
 	local clean = vim.deepcopy(data)
 	clean._path, clean._dir, clean._from_legacy = nil, nil, nil
 	return M.save_file(path, clean)
@@ -516,7 +465,7 @@ end
 --- Defaults written into every new/ensured `organize` block.
 function M.default_organize()
 	return {
-		ignore = { "documents", "logarktos.lua" },
+		ignore = { "documents", "logarktos.lua", "logarktos-config.lua" },
 		fixed = {},
 		files = "timestamps", -- or "extensions"
 	}
@@ -648,9 +597,6 @@ function M.persist_folder_defaults(data, dir)
 	local path = data._path or M.path_in(dir)
 	local migrated = M.migrate_work_section(data, dir)
 	local added = M.apply_folder_defaults(data, dir)
-	if M.is_user_dir(dir) then
-		vim.list_extend(added, M.apply_user_defaults(data))
-	end
 	local from_legacy = data._from_legacy
 	if #added == 0 and #migrated == 0 and not from_legacy then
 		return {}
@@ -710,13 +656,6 @@ function M.refresh(dir)
 
 	local path = M.path_in(dir)
 	local file_missing = path and not util.exists(path)
-	-- The config directory's missing file is the user file, not a folder stub.
-	if file_missing and M.is_user_dir(dir) and not util.exists(util.join(dir, M.LEGACY_ENV)) then
-		local user = M.ensure_user()
-		if type(user) ~= "table" then return false, nil end
-		util.refresh_oil()
-		return true, {}
-	end
 	-- Load raw (not via load_dir) so this command owns notify / write once.
 	-- Auto-backfill on other reads still goes through load_dir → persist_folder_defaults.
 	local data
@@ -737,9 +676,6 @@ function M.refresh(dir)
 	end
 	local migrated = M.migrate_work_section(data, dir)
 	local added = M.apply_folder_defaults(data, dir)
-	if M.is_user_dir(dir) then
-		vim.list_extend(added, M.apply_user_defaults(data))
-	end
 
 	if not (file_missing or #added > 0 or #migrated > 0 or data._from_legacy) then
 		util.notify((path or "logarktos.lua") .. " is already up to date", vim.log.levels.INFO)
@@ -1074,8 +1010,6 @@ local USER_DEFAULTS = {
 		api_key_env = "OPENAI_API_KEY",
 	},
 	bookmarks = {},
-	-- Per-folder organize defaults also seed the user config template.
-	organize = M.default_organize(),
 }
 
 local function migrate_bookmarks_json()
@@ -1129,12 +1063,11 @@ function M.save_user(data)
 	local path = M.user_path()
 	local clean = vim.deepcopy(data)
 	clean._path, clean._dir, clean._from_legacy = nil, nil, nil
-	return M.save_file(path, clean)
+	return M.save_file(path, clean, USER_HEADER)
 end
 
 --- Fill missing user-file keys. Values already set are kept. `seed` fills
---- gaps only (a new file, or a folder-only file repaired during setup).
---- Nil defaults such as an unset start_dir are omitted, not written as nil.
+--- gaps only. Nil defaults such as an unset start_dir are omitted.
 --- @param data table
 --- @param seed table|nil
 --- @return string[] dotted paths that were added
@@ -1143,14 +1076,65 @@ function M.apply_user_defaults(data, seed)
 	return deep_fill_missing(data, M.user_template(seed))
 end
 
---- Load the user file, creating the hybrid file (user defaults + config-folder
---- sections) when it is missing. An existing file that does not load is left
---- as-is. An existing file gains any missing user or folder keys.
---- @param seed table|nil  values to bake into keys that are still absent
+--- Copy user keys out of a folder table. The folder table loses those keys.
+--- @return table lifted, string[] moved
+local function lift_user_keys(folder)
+	local lifted, moved = {}, {}
+	if type(folder) ~= "table" then return lifted, moved end
+	for _, key in ipairs(USER_KEYS) do
+		if folder[key] ~= nil then
+			lifted[key] = folder[key]
+			folder[key] = nil
+			moved[#moved + 1] = key
+		end
+	end
+	return lifted, moved
+end
+
+--- Keep Organize from moving logarktos-config.lua out of the config directory.
+--- @return boolean added
+local function note_config_basename(folder)
+	if type(folder) ~= "table" or type(folder.organize) ~= "table" then return false end
+	local ignore = folder.organize.ignore
+	if type(ignore) ~= "table" then return false end
+	for _, name in ipairs(ignore) do
+		if name == M.CONFIG_FILENAME then return false end
+	end
+	ignore[#ignore + 1] = M.CONFIG_FILENAME
+	return true
+end
+
+--- Remove user keys from the config directory's logarktos.lua.
+--- The user file must already exist; this does not copy keys back into it.
+--- @return string[] keys removed (empty if the folder file was left as it was)
+local function strip_folder_user_keys()
+	local folder_path = M.path_in(vim.fn.stdpath("config"))
+	if not folder_path or not util.exists(folder_path) then return {} end
+	local folder = load_table_silent(folder_path)
+	if not folder then return {} end
+	local _, moved = lift_user_keys(folder)
+	local noted = note_config_basename(folder)
+	if #moved == 0 and not noted then return {} end
+	if not M.save_file(folder_path, folder) then return {} end
+	return moved
+end
+
+local function api_key_hint()
+	return "Put your OpenAI API key in a gitignored .env as OPENAI_API_KEY "
+		.. "(or set that environment variable)."
+end
+
+--- Load logarktos-config.lua, creating it when missing.
+--- A missing file is filled from user keys in the config folder's logarktos.lua
+--- when that file loads, otherwise from defaults. Those keys are then removed
+--- from the folder file. An existing config file keeps its values. A file that
+--- does not load is left unchanged, and no config file is created from it.
+--- @param seed table|nil  values used only where a key is still absent
 --- @return table|nil data, boolean created
 function M.ensure_user(seed)
 	local path = M.user_path()
-	local config_dir = vim.fn.stdpath("config")
+	local folder_path = M.path_in(vim.fn.stdpath("config"))
+
 	if util.exists(path) then
 		local data = load_table_silent(path)
 		if not data then
@@ -1162,7 +1146,6 @@ function M.ensure_user(seed)
 		end
 		data._path = path
 		local added = M.apply_user_defaults(data, seed)
-		vim.list_extend(added, M.apply_folder_defaults(data, config_dir))
 		if #added > 0 and M.save_user(data) then
 			table.sort(added)
 			util.notify(
@@ -1170,18 +1153,56 @@ function M.ensure_user(seed)
 				vim.log.levels.INFO
 			)
 		end
+		local removed = strip_folder_user_keys()
+		if #removed > 0 then
+			util.notify(
+				"Removed user settings from " .. folder_path .. ": " .. table.concat(removed, ", "),
+				vim.log.levels.INFO
+			)
+		end
 		return data, false
 	end
+
+	local source = nil
+	if folder_path and util.exists(folder_path) then
+		source = load_table_silent(folder_path)
+		if not source then
+			util.notify(
+				"Left " .. folder_path .. " unchanged because it did not load. "
+					.. M.CONFIG_FILENAME .. " was not created.",
+				vim.log.levels.ERROR
+			)
+			return nil, false
+		end
+	end
+
 	local data = M.user_template(seed)
-	M.apply_folder_defaults(data, config_dir)
-	if not M.save_file(path, data) then return nil, false end
+	local lifted_keys = {}
+	if source then
+		local lifted, moved = lift_user_keys(vim.deepcopy(source))
+		lifted_keys = moved
+		for _, key in ipairs(moved) do
+			data[key] = lifted[key]
+		end
+	end
+	M.apply_user_defaults(data, seed)
+	if not M.save_user(data) then return nil, false end
 	data._path = path
-	util.notify(
-		"Created " .. path .. " with logarktos defaults.\n"
-			.. "Put your OpenAI API key in a gitignored .env as OPENAI_API_KEY "
-			.. "(or set that environment variable).",
-		vim.log.levels.INFO
-	)
+	strip_folder_user_keys()
+
+	if #lifted_keys > 0 then
+		util.notify(
+			"Created " .. path .. " from " .. folder_path
+				.. " (moved: " .. table.concat(lifted_keys, ", ") .. ").\n"
+				.. api_key_hint(),
+			vim.log.levels.INFO
+		)
+	else
+		util.notify(
+			"Created " .. path .. " with logarktos defaults.\n" .. api_key_hint(),
+			vim.log.levels.INFO
+		)
+	end
 	return data, true
 end
 

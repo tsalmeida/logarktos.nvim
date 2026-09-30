@@ -380,11 +380,11 @@ end
 
 --- Send the visual selection (or whole buffer) to OpenAI and show the reply
 --- in a right-hand split. Model / max chars / default instruction come from
---- the user logarktos.lua (and setup); the API key from $OPENAI_API_KEY.
+--- logarktos-config.lua (and setup); the API key from $OPENAI_API_KEY.
 function M.send_to_ai()
 	if not M.enabled() then
 		util.notify(
-			"AI is disabled. Enable it in your logarktos.lua (`ai = { enabled = true }`) "
+			"AI is disabled. Enable it in logarktos-config.lua (`ai = { enabled = true }`) "
 				.. "or setup({ ai = { enabled = true } }).",
 			vim.log.levels.WARN,
 			"AI"

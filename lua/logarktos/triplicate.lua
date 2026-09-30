@@ -9,7 +9,7 @@ local util = require("logarktos.util")
 local M = {}
 
 local function determine_start_dir()
-	-- Prefer setup / user logarktos.lua (start_dir → triplicate.dir).
+	-- Prefer setup / logarktos-config.lua (start_dir → triplicate.dir).
 	local cfg = config.options.triplicate and config.options.triplicate.dir
 	if cfg and cfg ~= "" then return cfg end
 	-- Legacy env fallback for shells that still export it.

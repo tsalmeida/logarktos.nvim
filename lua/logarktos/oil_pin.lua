@@ -1,14 +1,17 @@
--- logarktos/oil_pin.lua ── keep logarktos.lua at the top of every Oil listing
+-- logarktos/oil_pin.lua ── keep logarktos settings files at the top of Oil
 --
 -- Oil sorts via named columns (view_options.sort). We register a sort-only
--- column that ranks "logarktos.lua" ahead of everything else, then prepend it
--- to the active sort so it wins over mtime/name/type. `../` is rendered above
--- the sorted list by Oil itself, so the result is: .., logarktos.lua, …
+-- column that ranks "logarktos.lua" and "logarktos-config.lua" ahead of
+-- everything else, then prepend it to the active sort so it wins over
+-- mtime/name/type. `../` is rendered above the sorted list by Oil itself.
 
 local M = {}
 
 local COLUMN = "logarktos_pin"
-local PINNED = "logarktos.lua"
+local PINNED = {
+	["logarktos.lua"] = true,
+	["logarktos-config.lua"] = true,
+}
 
 local did_setup = false
 
@@ -35,7 +38,7 @@ local function try_setup()
 		end,
 		get_sort_value = function(entry)
 			local name = entry[FIELD_NAME]
-			if type(name) == "string" and name:lower() == PINNED then
+			if type(name) == "string" and PINNED[name:lower()] then
 				return 0
 			end
 			return 1

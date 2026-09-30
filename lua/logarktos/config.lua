@@ -78,7 +78,7 @@ M.defaults = {
 	bufferfiles = {
 		enabled = true,
 		-- Root folder for scratch bufferfiles. Defaults to a private state dir.
-		-- Prefer setting this in stdpath("config")/logarktos.lua; $BUFFERFILES_DIR
+		-- Prefer setting this in stdpath("config")/logarktos-config.lua; $BUFFERFILES_DIR
 		-- is still accepted as a legacy fallback when dir is nil.
 		dir = nil,
 		-- Keep at most this many files in the root; older ones move to archive/.
@@ -153,8 +153,8 @@ M.defaults = {
 	},
 
 	-- Optional AI helpers (filename suggester + space+ai send). Disabled by
-	-- default in the plugin; the user's logarktos.lua usually enables them.
-	-- The API key is never stored in logarktos.lua — only the env var *name*.
+	-- default in the plugin; logarktos-config.lua usually enables them.
+	-- The API key is never stored in that file — only the env var *name*.
 	ai = {
 		enabled = false,
 		api_key_env = "OPENAI_API_KEY",

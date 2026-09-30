@@ -54,9 +54,10 @@ end
 function M.setup(opts)
 	opts = opts or {}
 
-	-- User file at stdpath("config")/logarktos.lua: start_dir, ignore_dirs,
-	-- bufferfiles, ai prefs, bookmarks, and optional work/textwork for that folder.
-	-- setup() opts win over the file so the plugin list can still force keymaps etc.
+	-- User file at stdpath("config")/logarktos-config.lua: start_dir, ignore_dirs,
+	-- bufferfiles, ai prefs, bookmarks. The config folder's own layout stays in
+	-- logarktos.lua. setup() opts win over the file so the plugin list can still
+	-- force keymaps etc.
 	local rcfile = require("logarktos.rcfile")
 	local seed = {}
 	if opts.triplicate and opts.triplicate.dir then

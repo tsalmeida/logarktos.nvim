@@ -45,8 +45,8 @@ local function normpath(p)
 	return p
 end
 
---- Bookmarks live in stdpath("config")/logarktos.lua (user file). Fall back to
---- a legacy JSON store only when the user file has no bookmarks list yet.
+--- Bookmarks live in stdpath("config")/logarktos-config.lua. Fall back to
+--- a legacy JSON store only when that file has no bookmarks list yet.
 local function load_list()
 	local rcfile = require("logarktos.rcfile")
 	local from_user = rcfile.get_user_bookmarks()

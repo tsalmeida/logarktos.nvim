@@ -65,7 +65,7 @@ bufferfiles = {
 }
 ```
 
-Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env vars.
+Prefer setting `dir` in `logarktos-config.lua` (see below) rather than env vars.
 
 ### Layouts — tabs as workspaces
 
@@ -83,37 +83,34 @@ Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env var
 | `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |
 | `:LogarktosSendToAI` | send selection/buffer to OpenAI (needs `ai.enabled` + API key) |
 
-### `logarktos.lua` — user prefs + per-folder layouts
+### `logarktos-config.lua` and `logarktos.lua`
 
-Two scopes share the same filename and Lua table format:
+1. **User file** — `stdpath("config")/logarktos-config.lua`  
+   Machine settings: `start_dir` (Triplicate / “open start folder”),
+   `ignore_dirs` (recent-files panel), `bufferfiles`, `ai` (model, max input
+   chars, default instruction), and `bookmarks`. **Never put API keys here**
+   — set `OPENAI_API_KEY` in the environment or a gitignored `.env`. When the
+   key is missing, AI commands tell you where to put it.
 
-1. **User file** — `stdpath("config")/logarktos.lua`  
-   The config directory is also a folder, so this one file holds the user
-   preferences **and** that folder's layout sections (`tabname`, `organize`,
-   `work`, `textwork`). User keys: `start_dir` (Triplicate / “open start
-   folder”), `ignore_dirs` (recent-files panel), `bufferfiles`, `ai` (model,
-   max input chars, default instruction), and `bookmarks`. **Never put API
-   keys here** — set `OPENAI_API_KEY` in the environment or a gitignored
-   `.env`. When the key is missing, AI commands tell you where to put it.
+   If this file is missing, startup creates it. User keys still stored in the
+   config folder's `logarktos.lua` (the old combined file) are copied over,
+   then removed from that folder file. A machine with no such keys gets
+   defaults — personal bookmarks, `start_dir`, and the bufferfiles folder are
+   not invented. An existing config file keeps every value already set; missing
+   user keys are filled in. A file that does not load is left unchanged, and
+   the config file is not created from it.
 
-   If the file is missing, the plugin writes a fresh one with those defaults
-   on startup and whenever the config directory is read (WorkMode, Organize,
-   `:Logarktos`, bookmarks). Personal bookmarks, `start_dir`, and the
-   bufferfiles folder are not recovered. An existing file keeps every value
-   already set; missing user keys are filled in, so a layout command cannot
-   replace this file with a folder-only table. A file that does not load is
-   left unchanged.
-
-2. **Project files** — `logarktos.lua` in any folder you open a layout from  
-   Holds `work` / `textwork` pane targets. **`:WorkMode` / `:HereWorkMode` /
-   `:TextWork`** ensure the matching section exists: if the file or section is
-   missing, it is written from the **plain** first-run defaults (terminal left
-   with no auto-start command; Oil on the layout folder for centre and right;
-   TextWork’s right Oil focus empty = the dual-pane file). No special folders
-   (`frontend/sdl/`, `documents/prompts/`, etc.) are guessed — add those paths
-   yourself when you want them. Later runs read the file. Older `aimode` /
-   stacked-terminal `work` sections are migrated into the three-pane `work`
-   shape on first load.
+2. **Folder files** — `logarktos.lua` in any folder you open a layout from,
+   including the Neovim config folder.  
+   Holds `tabname`, `organize`, `work`, and `textwork`. **`:WorkMode` /
+   `:HereWorkMode` / `:TextWork`** ensure the matching section exists: if the
+   file or section is missing, it is written from the **plain** first-run
+   defaults (terminal left with no auto-start command; Oil on the layout
+   folder for centre and right; TextWork’s right Oil focus empty = the
+   dual-pane file). No special folders (`frontend/sdl/`, `documents/prompts/`,
+   etc.) are guessed — add those paths yourself when you want them. Later runs
+   read the file. Older `aimode` / stacked-terminal `work` sections are
+   migrated into the three-pane `work` shape on first load.
 
 ```lua
 -- What the plugin seeds on first use (plain defaults; command / focus ready to fill):
@@ -260,20 +257,21 @@ it files the current file — or the Oil entry / visual selection — into a
   absent. Each known field is written with one short comment line above it.
   (Usually unnecessary now that loads backfill missing keys, but still useful
   to create a full template in a folder that has no file yet.)
-- **Oil pin:** when a directory contains `logarktos.lua`, Oil lists it first
+- **Oil pin:** `logarktos.lua` and `logarktos-config.lua` list first
   (immediately after `../`), via a sort-only column registered at setup.
 
 ### Organize
 
 - `:LogarktosOrganize` — sort a directory's loose files and folders into dated
   buckets, with a log of everything moved. Skips `documents/`, `logarktos.lua`,
-  and the Auto Ordered* buckets by default. Settings live in that folder's
-  `logarktos.lua` under `organize` (written on first run if missing):
+  `logarktos-config.lua`, and the Auto Ordered* buckets by default. Settings
+  live in that folder's `logarktos.lua` under `organize` (written on first run
+  if missing):
 
   ```lua
   organize = {
     -- basenames skipped; add more as needed
-    ignore = { "documents", "logarktos.lua" },
+    ignore = { "documents", "logarktos.lua", "logarktos-config.lua" },
     -- emptied into folders_bucket/<name> (no date prefix); originals stay empty
     fixed = { "fonts" },
     -- "timestamps" (default) or "extensions" (no timestamp subfolder for files)

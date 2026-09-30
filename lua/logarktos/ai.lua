@@ -175,8 +175,12 @@ local function unique_filename(base, ext, dir, current_path, max_len)
 	return target, name
 end
 
-function M.suggest_filename()
-	if not M.enabled() then
+function M.suggest_filename(opts)
+	opts = opts or {}
+	-- opts.reply skips the network so a headless check can exercise the rename.
+	-- The user command never passes it.
+	local scripted = type(opts.reply) == "string" and opts.reply ~= ""
+	if not scripted and not M.enabled() then
 		util.notify("The AI module is disabled. Enable it with setup({ ai = { enabled = true } }).",
 			vim.log.levels.WARN, "SuggestFilename")
 		return
@@ -226,10 +230,15 @@ function M.suggest_filename()
 		"The following text is %s%s (up to %d characters):\n\n%s\n\nProvide a CamelCase filename (no extension). Reply with only the proposed name.",
 		origin, qualifier, max_chars, escaped_preview)
 
-	local reply, model = call_openai({
-		{ role = "system", content = system_prompt },
-		{ role = "user", content = user_prompt },
-	})
+	local reply, model
+	if scripted then
+		reply, model = opts.reply, opts.model or "manual"
+	else
+		reply, model = call_openai({
+			{ role = "system", content = system_prompt },
+			{ role = "user", content = user_prompt },
+		})
+	end
 
 	if not reply then
 		local default_name = "SuggestedFile"
@@ -254,7 +263,13 @@ function M.suggest_filename()
 	local base = nm_prefix and (nm_prefix .. " - " .. sanitized)
 		or (os.date("%Y%m%d - %H%M%S") .. " - " .. sanitized)
 
-	local dir = (current_path ~= "") and vim.fn.fnamemodify(current_path, ":h") or vim.fn.getcwd()
+	-- A scratch bufferfile lives in the root under the standard prefix. Naming
+	-- it promotes the note into named/ (kept; not part of the rotating pile).
+	-- Anywhere else — including a file already in named/ — stays in its folder.
+	local bf = require("logarktos.bufferfiles")
+	local promote = current_path ~= "" and bf.is_root_file(current_path)
+	local dir = promote and bf.named_dir()
+		or ((current_path ~= "") and vim.fn.fnamemodify(current_path, ":h") or vim.fn.getcwd())
 	local ext = ""
 	if current_path ~= "" then
 		local current_ext = vim.fn.fnamemodify(current_path, ":e")
@@ -273,7 +288,16 @@ function M.suggest_filename()
 	end
 
 	local renamed = false
-	if current_path ~= "" and normalized_current then
+	if promote then
+		local ok, err = bf.save_into(buf, current_path, target_path)
+		if not ok then
+			util.notify("Could not move bufferfile into named/: " .. tostring(err or "unknown error"),
+				vim.log.levels.ERROR, "SuggestFilename")
+			return
+		end
+		renamed = true
+		final_name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":t")
+	elseif current_path ~= "" and normalized_current then
 		local ok, err = uv.fs_rename(current_path, target_path)
 		if not ok then ok, err = os.rename(current_path, target_path) end
 		if not ok then
@@ -281,12 +305,17 @@ function M.suggest_filename()
 			return
 		end
 		renamed = true
+		vim.api.nvim_buf_set_name(buf, target_path)
+		if vim.b[buf].bufferfile_assigned then vim.b[buf].bufferfile_path = target_path end
+	else
+		vim.api.nvim_buf_set_name(buf, target_path)
+		if vim.b[buf].bufferfile_assigned then vim.b[buf].bufferfile_path = target_path end
 	end
 
-	vim.api.nvim_buf_set_name(buf, target_path)
-	if vim.b[buf].bufferfile_assigned then vim.b[buf].bufferfile_path = target_path end
-
-	if renamed then
+	if promote then
+		util.notify(string.format("Named %s and moved it to bufferfiles/named/ (model: %s)", final_name, model),
+			vim.log.levels.INFO, "SuggestFilename")
+	elseif renamed then
 		util.notify(string.format("Renamed to %s (model: %s)", final_name, model), vim.log.levels.INFO, "SuggestFilename")
 	else
 		util.notify(string.format("Suggested buffer name: %s (model: %s)", final_name, model), vim.log.levels.INFO, "SuggestFilename")

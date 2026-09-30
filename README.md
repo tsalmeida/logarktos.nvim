@@ -339,7 +339,10 @@ require("logarktos").setup({
 ```
 
 `:LogarktosSuggestFilename` proposes a CamelCase name from the buffer's content,
-preserving a `:LogarktosNewMarkdown` timestamp prefix when present.
+preserving a `:LogarktosNewMarkdown` timestamp prefix when present. On a scratch
+bufferfile sitting in the bufferfiles root, that name is saved into `named/`
+and the buffer follows the file. `named/` is kept — retention does not archive
+it. A file anywhere else, including one already in `named/`, is renamed in place.
 
 For notes seeded from a `template.md` (the same `markdown.template` used by
 `:LogarktosNewMarkdown`), the shared template lines are stripped before the text

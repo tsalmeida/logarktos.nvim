@@ -9,7 +9,10 @@
 --   • Root holds at most `keep` most-recent files (by mtime).
 --   • Older files move to ROOT/archive/  (never scanned).
 --   • Files renamed away from the standard prefix are timestamped and moved to
---     ROOT/named/ (never scanned).
+--     ROOT/named/ (never scanned). An open buffer follows the file: the move
+--     must not leave it pointing at the old path (that looks like a delete).
+--   • :SuggestFilename on a root scratch file saves it straight into named/
+--     (see save_into) instead of waiting for the next sweep.
 --   • Standard pattern (auto-created): <prefix>YYYYMMDD-HHMMSS(-N?).md
 
 local config = require("logarktos.config")
@@ -113,6 +116,41 @@ local function rename_move(src, dst_dir, new_name)
 	end
 	local ok, err = uv.fs_rename(src, target)
 	if not ok then ok, err = os.rename(src, target) end
+	return ok, err, target
+end
+
+local function same_path(a, b)
+	if type(a) ~= "string" or type(b) ~= "string" or a == "" or b == "" then return false end
+	a, b = vim.fs.normalize(a), vim.fs.normalize(b)
+	if vim.fn.has("win32") == 1 then return a:lower() == b:lower() end
+	return a == b
+end
+
+-- Point every loaded buffer that still shows `old_path` at `new_path`.
+-- A bare fs_rename leaves the buffer on the vanished path; the config's
+-- FileChangedShell handler then treats the note as deleted.
+local function retarget_buffers(old_path, new_path)
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.api.nvim_buf_is_loaded(buf) and same_path(vim.api.nvim_buf_get_name(buf), old_path) then
+			local ok = pcall(vim.api.nvim_buf_set_name, buf, new_path)
+			if not ok then
+				pcall(vim.api.nvim_buf_call, buf, function()
+					vim.cmd("silent keepalt file " .. vim.fn.fnameescape(new_path))
+				end)
+			end
+			if same_path(vim.api.nvim_buf_get_name(buf), new_path) then
+				vim.b[buf].bufferfile_assigned = true
+				vim.b[buf].bufferfile_path = vim.api.nvim_buf_get_name(buf)
+			end
+		elseif vim.api.nvim_buf_is_loaded(buf) and same_path(vim.b[buf].bufferfile_path, old_path) then
+			vim.b[buf].bufferfile_path = new_path
+		end
+	end
+end
+
+local function move_and_retarget(src, dst_dir, new_name)
+	local ok, err, target = rename_move(src, dst_dir, new_name)
+	if ok and target then retarget_buffers(src, target) end
 	return ok, err, target
 end
 
@@ -438,7 +476,7 @@ local function move_nonstandard(files)
 		if not is_standard_filename(base) then
 			local ymd, hms = now_ymd_hms()
 			local plain = sanitize_base(base)
-			rename_move(p, named_dir, string.format("%s-%s-%s.md", ymd, plain, hms))
+			move_and_retarget(p, named_dir, string.format("%s-%s-%s.md", ymd, plain, hms))
 		end
 	end
 end
@@ -457,11 +495,17 @@ local function move_older_to_archive(n)
 	table.sort(files, function(a, b) return mtimes[a] > mtimes[b] end)
 
 	for i = n + 1, #files do
-		rename_move(files[i], archive_dir, vim.fs.basename(files[i]))
+		move_and_retarget(files[i], archive_dir, vim.fs.basename(files[i]))
 	end
 end
 
+-- :SuggestFilename writes the note into named/ with :saveas. That write
+-- would otherwise re-enter maintain_now while the old scratch file is still
+-- in the root and sweep it a second time.
+local maintain_suspended = 0
+
 local function maintain_now()
+	if maintain_suspended > 0 then return end
 	local files = list_root_files()
 	if #files == 0 then return end
 	delete_empties(files)
@@ -484,6 +528,66 @@ end
 
 function M.open_root()
 	util.open_dir(M.root_dir())
+end
+
+local function as_dir(path)
+	local dir = vim.fs.normalize(path)
+	return (dir:gsub("[/\\]+$", ""))
+end
+
+--- True when `path` is a file directly in the bufferfiles root (not named/ or archive/).
+function M.is_root_file(path)
+	if type(path) ~= "string" or path == "" then return false end
+	local root = as_dir(get_root_dir())
+	local dir = as_dir(vim.fn.fnamemodify(path, ":h"))
+	if vim.fn.has("win32") == 1 then return dir:lower() == root:lower() end
+	return dir == root
+end
+
+--- `ROOT/named`, created if needed.
+function M.named_dir()
+	local _, _, named = subdirs()
+	return named
+end
+
+--- Run `fn` without the post-write bufferfile sweep.
+function M.with_maintain_suspended(fn)
+	maintain_suspended = maintain_suspended + 1
+	local ok, err = pcall(fn)
+	maintain_suspended = maintain_suspended - 1
+	return ok, err
+end
+
+--- Save `buf` as `new_path` and remove `old_path` once the buffer has adopted
+--- the new file. Used when an AI (or typed) name promotes a root scratch
+--- bufferfile into named/. Returns ok, err.
+function M.save_into(buf, old_path, new_path)
+	if not vim.api.nvim_buf_is_valid(buf) then return false, "invalid buffer" end
+	if type(new_path) ~= "string" or new_path == "" then return false, "no target path" end
+	ensure_dir(vim.fn.fnamemodify(new_path, ":h"))
+
+	local ok, err = M.with_maintain_suspended(function()
+		vim.api.nvim_buf_call(buf, function()
+			vim.cmd("silent keepalt saveas! " .. vim.fn.fnameescape(new_path))
+		end)
+	end)
+	if not ok then return false, tostring(err) end
+
+	local now = vim.api.nvim_buf_get_name(buf)
+	if not same_path(now, new_path) then
+		return false, "buffer did not adopt " .. new_path
+	end
+
+	if type(old_path) == "string" and old_path ~= "" and not same_path(old_path, now) and uv.fs_stat(old_path) then
+		local deleted = vim.fn.delete(old_path)
+		if deleted ~= 0 then
+			return false, "saved the new name but could not remove the old bufferfile"
+		end
+	end
+
+	vim.b[buf].bufferfile_assigned = true
+	vim.b[buf].bufferfile_path = now
+	return true
 end
 
 -- ── setup (install autocmds) ─────────────────────────────────────────────────

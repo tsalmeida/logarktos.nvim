@@ -88,12 +88,21 @@ Prefer setting `dir` in the user `logarktos.lua` (see below) rather than env var
 Two scopes share the same filename and Lua table format:
 
 1. **User file** — `stdpath("config")/logarktos.lua`  
-   Created on first setup if missing. Holds machine/user logarktos data:
-   `start_dir` (Triplicate / “open start folder”), `ignore_dirs` (recent-files
-   panel), `bufferfiles`, `ai` (model, max input chars, default instruction),
-   and `bookmarks`. **Never put API keys here** — set `OPENAI_API_KEY` in the
-   environment or a gitignored `.env`. When the key is missing, AI commands
-   tell you where to put it.
+   The config directory is also a folder, so this one file holds the user
+   preferences **and** that folder's layout sections (`tabname`, `organize`,
+   `work`, `textwork`). User keys: `start_dir` (Triplicate / “open start
+   folder”), `ignore_dirs` (recent-files panel), `bufferfiles`, `ai` (model,
+   max input chars, default instruction), and `bookmarks`. **Never put API
+   keys here** — set `OPENAI_API_KEY` in the environment or a gitignored
+   `.env`. When the key is missing, AI commands tell you where to put it.
+
+   If the file is missing, the plugin writes a fresh one with those defaults
+   on startup and whenever the config directory is read (WorkMode, Organize,
+   `:Logarktos`, bookmarks). Personal bookmarks, `start_dir`, and the
+   bufferfiles folder are not recovered. An existing file keeps every value
+   already set; missing user keys are filled in, so a layout command cannot
+   replace this file with a folder-only table. A file that does not load is
+   left unchanged.
 
 2. **Project files** — `logarktos.lua` in any folder you open a layout from  
    Holds `work` / `textwork` pane targets. **`:WorkMode` / `:HereWorkMode` /

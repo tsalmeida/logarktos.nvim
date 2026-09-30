@@ -1,9 +1,13 @@
 -- logarktos/rcfile.lua ── load / save `logarktos.lua` (user + per-folder)
 --
--- Per-folder files describe layout panes (work / textwork). The special
--- file at stdpath("config")/logarktos.lua also holds user preferences (start_dir,
--- bufferfiles, ignore_dirs, bookmarks, AI model/limits, …). API keys stay in
--- the real environment / a gitignored `.env` — never in these Lua files.
+-- Per-folder files describe layout panes (work / textwork). The file at
+-- stdpath("config")/logarktos.lua is that folder's file and the user file:
+-- start_dir, ignore_dirs, bufferfiles, ai, bookmarks, plus the layout
+-- sections. API keys stay in the environment or a gitignored `.env`.
+--
+-- A missing user file is rewritten with those defaults on setup and on any
+-- read of the config directory. Personal bookmarks and paths are not
+-- restored. Layout commands cannot leave a folder-only file at that path.
 --
 -- Example (user / nvim config root):
 --   return {
@@ -51,6 +55,37 @@ end
 function M.path_in(dir)
 	if not dir or dir == "" then return nil end
 	return util.join(dir, M.FILENAME)
+end
+
+--- Same directory, ignoring trailing slashes and Windows case.
+local function same_dir(a, b)
+	if type(a) ~= "string" or a == "" or type(b) ~= "string" or b == "" then
+		return false
+	end
+	local function norm(p)
+		p = util.normalize(p)
+		return (p:gsub("[/\\]+$", ""))
+	end
+	local x, y = norm(a), norm(b)
+	if vim.fn.has("win32") == 1 then
+		return x:lower() == y:lower()
+	end
+	return x == y
+end
+
+--- True when `dir` is stdpath("config"). That path is both the user file and a folder file.
+function M.is_user_dir(dir)
+	return same_dir(dir, vim.fn.stdpath("config"))
+end
+
+--- Load `path` as a Lua table without notifying. nil when missing, unloadable, or not a table.
+local function load_table_silent(path)
+	if not path or path == "" or not util.exists(path) then return nil end
+	local chunk = loadfile(path)
+	if not chunk then return nil end
+	local ok, data = pcall(chunk)
+	if not ok or type(data) ~= "table" then return nil end
+	return data
 end
 
 function M.is_absolute(path)
@@ -353,6 +388,17 @@ function M.load_dir(dir)
 			return converted
 		end
 	end
+	-- Missing user file: write user defaults plus this folder's sections
+	-- before a layout command can create a folder-only file at the same path.
+	-- An existing file that failed to load is left untouched.
+	if not util.exists(path) and M.is_user_dir(dir) then
+		local user = M.ensure_user()
+		if type(user) == "table" then
+			user._path = path
+			user._dir = dir
+			return user
+		end
+	end
 	return nil
 end
 
@@ -363,7 +409,19 @@ end
 
 function M.save_dir(dir, data)
 	local path = M.path_in(dir)
-	if not path then return false end
+	if not path or type(data) ~= "table" then return false end
+	-- Never replace an unloadable user file with defaults (that would drop bookmarks).
+	if M.is_user_dir(dir) and util.exists(path) and not load_table_silent(path) then
+		util.notify(
+			"Left " .. path .. " unchanged because it did not load.",
+			vim.log.levels.ERROR
+		)
+		return false
+	end
+	-- A folder save of the config directory must keep the user-file keys.
+	if M.is_user_dir(dir) then
+		M.apply_user_defaults(data)
+	end
 	local clean = vim.deepcopy(data)
 	clean._path, clean._dir, clean._from_legacy = nil, nil, nil
 	return M.save_file(path, clean)
@@ -500,12 +558,13 @@ function M.ensure_organize(base)
 	end
 
 	if changed or file_missing or data._from_legacy then
-		M.save_dir(base, data)
-		data._from_legacy = nil
-		if changed and not file_missing then
-			util.notify("Wrote organize section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
-		elseif file_missing then
-			util.notify("Created " .. (path or "logarktos.lua") .. " with organize settings", vim.log.levels.INFO)
+		if M.save_dir(base, data) then
+			data._from_legacy = nil
+			if changed and not file_missing then
+				util.notify("Wrote organize section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+			elseif file_missing then
+				util.notify("Created " .. (path or "logarktos.lua") .. " with organize settings", vim.log.levels.INFO)
+			end
 		end
 	end
 	return data.organize, data
@@ -589,6 +648,9 @@ function M.persist_folder_defaults(data, dir)
 	local path = data._path or M.path_in(dir)
 	local migrated = M.migrate_work_section(data, dir)
 	local added = M.apply_folder_defaults(data, dir)
+	if M.is_user_dir(dir) then
+		vim.list_extend(added, M.apply_user_defaults(data))
+	end
 	local from_legacy = data._from_legacy
 	if #added == 0 and #migrated == 0 and not from_legacy then
 		return {}
@@ -648,6 +710,13 @@ function M.refresh(dir)
 
 	local path = M.path_in(dir)
 	local file_missing = path and not util.exists(path)
+	-- The config directory's missing file is the user file, not a folder stub.
+	if file_missing and M.is_user_dir(dir) and not util.exists(util.join(dir, M.LEGACY_ENV)) then
+		local user = M.ensure_user()
+		if type(user) ~= "table" then return false, nil end
+		util.refresh_oil()
+		return true, {}
+	end
 	-- Load raw (not via load_dir) so this command owns notify / write once.
 	-- Auto-backfill on other reads still goes through load_dir → persist_folder_defaults.
 	local data
@@ -668,6 +737,9 @@ function M.refresh(dir)
 	end
 	local migrated = M.migrate_work_section(data, dir)
 	local added = M.apply_folder_defaults(data, dir)
+	if M.is_user_dir(dir) then
+		vim.list_extend(added, M.apply_user_defaults(data))
+	end
 
 	if not (file_missing or #added > 0 or #migrated > 0 or data._from_legacy) then
 		util.notify((path or "logarktos.lua") .. " is already up to date", vim.log.levels.INFO)
@@ -913,19 +985,20 @@ function M.ensure_work(base)
 		filled = true
 	end
 	if section_missing or file_missing or data._from_legacy or filled then
-		M.save_dir(base, data)
-		data._from_legacy = nil
-		if #migrated > 0 then
-			util.notify(
-				"Updated " .. (path or "logarktos.lua") .. " — " .. table.concat(migrated, "; "),
-				vim.log.levels.INFO
-			)
-		elseif section_missing then
-			util.notify("Wrote work section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
-		elseif filled then
-			util.notify("Updated work section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
-		elseif file_missing then
-			util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
+		if M.save_dir(base, data) then
+			data._from_legacy = nil
+			if #migrated > 0 then
+				util.notify(
+					"Updated " .. (path or "logarktos.lua") .. " — " .. table.concat(migrated, "; "),
+					vim.log.levels.INFO
+				)
+			elseif section_missing then
+				util.notify("Wrote work section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+			elseif filled then
+				util.notify("Updated work section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+			elseif file_missing then
+				util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
+			end
 		end
 	end
 	local w = data.work
@@ -963,14 +1036,15 @@ function M.ensure_textwork(base)
 		filled = true
 	end
 	if section_missing or file_missing or data._from_legacy or filled then
-		M.save_dir(base, data)
-		data._from_legacy = nil
-		if section_missing then
-			util.notify("Wrote textwork section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
-		elseif filled then
-			util.notify("Updated textwork section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
-		elseif file_missing then
-			util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
+		if M.save_dir(base, data) then
+			data._from_legacy = nil
+			if section_missing then
+				util.notify("Wrote textwork section to " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+			elseif filled then
+				util.notify("Updated textwork section in " .. (path or "logarktos.lua"), vim.log.levels.INFO)
+			elseif file_missing then
+				util.notify("Created " .. (path or "logarktos.lua") .. " from layout settings", vim.log.levels.INFO)
+			end
 		end
 	end
 	local tw = data.textwork
@@ -1058,17 +1132,49 @@ function M.save_user(data)
 	return M.save_file(path, clean)
 end
 
---- Load user file, creating it with defaults when missing.
---- @param seed table|nil  values to bake into a newly created file
+--- Fill missing user-file keys. Values already set are kept. `seed` fills
+--- gaps only (a new file, or a folder-only file repaired during setup).
+--- Nil defaults such as an unset start_dir are omitted, not written as nil.
+--- @param data table
+--- @param seed table|nil
+--- @return string[] dotted paths that were added
+function M.apply_user_defaults(data, seed)
+	if type(data) ~= "table" then return {} end
+	return deep_fill_missing(data, M.user_template(seed))
+end
+
+--- Load the user file, creating the hybrid file (user defaults + config-folder
+--- sections) when it is missing. An existing file that does not load is left
+--- as-is. An existing file gains any missing user or folder keys.
+--- @param seed table|nil  values to bake into keys that are still absent
+--- @return table|nil data, boolean created
 function M.ensure_user(seed)
 	local path = M.user_path()
-	local data = M.load_file(path)
-	if data then
+	local config_dir = vim.fn.stdpath("config")
+	if util.exists(path) then
+		local data = load_table_silent(path)
+		if not data then
+			util.notify(
+				"Left " .. path .. " unchanged because it did not load.",
+				vim.log.levels.ERROR
+			)
+			return nil, false
+		end
 		data._path = path
+		local added = M.apply_user_defaults(data, seed)
+		vim.list_extend(added, M.apply_folder_defaults(data, config_dir))
+		if #added > 0 and M.save_user(data) then
+			table.sort(added)
+			util.notify(
+				"Updated " .. path .. " — added missing defaults: " .. table.concat(added, ", "),
+				vim.log.levels.INFO
+			)
+		end
 		return data, false
 	end
-	data = M.user_template(seed)
-	M.save_file(path, data)
+	local data = M.user_template(seed)
+	M.apply_folder_defaults(data, config_dir)
+	if not M.save_file(path, data) then return nil, false end
 	data._path = path
 	util.notify(
 		"Created " .. path .. " with logarktos defaults.\n"
@@ -1115,7 +1221,8 @@ end
 
 --- Update bookmarks array in the user file (creates file if needed).
 function M.set_user_bookmarks(list)
-	local data = M.load_user() or M.user_template()
+	local data = M.ensure_user()
+	if type(data) ~= "table" then return nil end
 	data.bookmarks = list or {}
 	M.save_user(data)
 	return data

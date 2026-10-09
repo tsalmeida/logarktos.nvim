@@ -47,6 +47,7 @@ local function specs()
 		{ "Focus", nil, function() layouts().focus_mode_tab() end, { desc = "Focus layout (centred editor)" } },
 		{ "FocusToggle", nil, function() layouts().focus_toggle() end, { desc = "Toggle inactive-window dimming" } },
 		{ "FixLayout", "FixLayout", function() layouts().fix_layout() end, { desc = "Even out the current tab's columns" } },
+		{ "LargeLayout", "LargeLayout", function() layouts().large_layout() end, { desc = "Apply large-mode column widths in the current tab" } },
 
 		-- bufferfiles
 		{ "BufferFiles", "BufferFiles", function() bufferfiles().open_root() end, { desc = "Open the bufferfiles root" } },

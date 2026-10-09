@@ -748,6 +748,31 @@ function M.dual_wide_mode_tab()
 	announce_layout_built()
 end
 
+-- Large Mode column widths: each side is a quarter of the editor, so the
+-- centre is the remaining half. Shared by new Large tabs and :LargeLayout.
+local function large_side_width()
+	return math.floor(vim.o.columns * 0.25)
+end
+
+local function apply_large_side_widths(left, right)
+	local q = large_side_width()
+	if left and vim.api.nvim_win_is_valid(left) then
+		vim.api.nvim_win_set_width(left, q)
+	end
+	if right and vim.api.nvim_win_is_valid(right) then
+		vim.api.nvim_win_set_width(right, q)
+	end
+end
+
+--- First leaf window inside a winlayout() node (a column may itself be a stack).
+local function first_leaf_win(node)
+	if not node then return nil end
+	if node[1] == "leaf" then return node[2] end
+	local children = node[2]
+	if type(children) ~= "table" or #children == 0 then return nil end
+	return first_leaf_win(children[1])
+end
+
 function M.large_mode_tab()
 	local buf = vim.api.nvim_get_current_buf()
 	local cwd = util.resolve_cwd(buf)
@@ -781,9 +806,7 @@ function M.large_mode_tab()
 		vim.bo.bufhidden = "wipe"
 		vim.bo.swapfile = false
 	end
-	local q = math.floor(vim.o.columns * 0.25)
-	vim.api.nvim_win_set_width(left, q)
-	vim.api.nvim_win_set_width(right, q)
+	apply_large_side_widths(left, right)
 	vim.api.nvim_set_current_win(mid)
 
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "large" })
@@ -810,9 +833,7 @@ function M.new_large_tab()
 	vim.cmd("rightbelow vnew")
 	local right = vim.api.nvim_get_current_win()
 	if right_dir then util.open_dir(right_dir, { focus = right_focus }) end
-	local q = math.floor(vim.o.columns * 0.25)
-	vim.api.nvim_win_set_width(left, q)
-	vim.api.nvim_win_set_width(right, q)
+	apply_large_side_widths(left, right)
 	vim.api.nvim_set_current_win(mid)
 
 	name_layout_tab(vim.api.nvim_win_get_buf(mid), { layout = "large" })
@@ -950,6 +971,34 @@ function M.fix_layout()
 
 	util.notify(("Layout evened (%d column%s)"):format(cols, cols == 1 and "" or "s"),
 		vim.log.levels.INFO, "FixLayout")
+end
+
+-- Re-apply Large Mode column widths in the current tab (no new tab, no
+-- buffer changes). Outer columns become a quarter of the editor each; the
+-- centre keeps the rest. Same proportions as space+lm / :Large.
+function M.large_layout()
+	local cur = vim.api.nvim_get_current_win()
+	local tab = vim.api.nvim_get_current_tabpage()
+	local tree = vim.fn.winlayout(tab)
+	local nodes = (tree[1] == "row") and tree[2] or { tree }
+	local n = #nodes
+
+	if n < 3 then
+		util.notify(
+			("Large layout needs 3 columns (this tab has %d)"):format(n),
+			vim.log.levels.WARN,
+			"LargeLayout"
+		)
+		return
+	end
+
+	apply_large_side_widths(first_leaf_win(nodes[1]), first_leaf_win(nodes[n]))
+
+	if vim.api.nvim_win_is_valid(cur) then
+		vim.api.nvim_set_current_win(cur)
+	end
+
+	util.notify("Layout set to large (wide centre)", vim.log.levels.INFO, "LargeLayout")
 end
 
 return M

@@ -37,6 +37,7 @@ local function actions()
 		focus               = { "n", function() L().focus_mode_tab() end, "Focus layout" },
 		focus_toggle        = { "n", function() L().focus_toggle() end, "Toggle inactive dimming" },
 		fix_layout          = { "n", function() L().fix_layout() end, "Fix layout (even columns)" },
+		large_layout        = { "n", function() L().large_layout() end, "Large layout (wide centre, this tab)" },
 
 		-- tabs
 		tab_rename          = { "n", function() T().rename_prompt() end, "Rename tab" },

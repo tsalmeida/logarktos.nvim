@@ -81,6 +81,7 @@ Prefer setting `dir` in `logarktos-config.lua` (see below) rather than env vars.
 | `:LogarktosDualWide` | Dual with three narrow scratch buffers (left edge, centre, right edge) for wide screens |
 | `:LogarktosFocusToggle` | toggle inactive-window dimming |
 | `:LogarktosFixLayout` | even out the current tab's columns (rebalances a messed-up layout) |
+| `:LogarktosLargeLayout` | apply Large Mode column widths in the current tab (wide centre; no new tab) |
 | `:LogarktosSendToAI` | send selection/buffer to OpenAI (needs `ai.enabled` + API key) |
 
 ### `logarktos-config.lua` and `logarktos.lua`

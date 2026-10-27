@@ -963,8 +963,7 @@ end
 -- :wincmd = equalises every window regardless of 'equalalways', so it restores
 -- even columns and rebalances any vertical split without flattening it.
 function M.fix_layout()
-	local tab = vim.api.nvim_get_current_tabpage()
-	local layout = vim.fn.winlayout(tab)
+	local layout = vim.fn.winlayout()
 	local cols = (layout[1] == "row") and #layout[2] or 1
 
 	vim.cmd("wincmd =")
@@ -978,8 +977,10 @@ end
 -- centre keeps the rest. Same proportions as space+lm / :Large.
 function M.large_layout()
 	local cur = vim.api.nvim_get_current_win()
-	local tab = vim.api.nvim_get_current_tabpage()
-	local tree = vim.fn.winlayout(tab)
+	-- winlayout() takes a tab *number*, not a tabpage handle. Handles drift
+	-- from numbers once tabs have been opened and closed, and a stale number
+	-- returns {} (counted as one column), so read the current tab directly.
+	local tree = vim.fn.winlayout()
 	local nodes = (tree[1] == "row") and tree[2] or { tree }
 	local n = #nodes
 

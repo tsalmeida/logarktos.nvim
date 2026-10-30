@@ -34,6 +34,14 @@ end
 function M.open(opts)
 	opts = opts or {}
 	local dir = opts.dir or determine_start_dir()
+	-- A junction whose target was unplugged is not a missing folder: the
+	-- reparse point is still there, and isdirectory follows it and fails.
+	-- Say so before any later mkdir turns that into E739.
+	local blocked = util.unavailable_junction(dir)
+	if blocked then
+		util.notify(blocked, vim.log.levels.ERROR, "Triplicate")
+		return false
+	end
 	if vim.fn.isdirectory(dir) ~= 1 then
 		util.notify("Directory does not exist → " .. dir, vim.log.levels.ERROR, "Triplicate")
 		return false

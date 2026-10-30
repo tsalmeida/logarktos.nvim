@@ -44,11 +44,21 @@ end
 local function get_root_dir()
 	-- Prefer setup / logarktos-config.lua (bufferfiles.dir). $BUFFERFILES_DIR is
 	-- still honoured as a last-resort override for old shells.
+	-- mkdir must not throw. On Windows, mkdir -p of a path under a junction
+	-- whose target is unplugged raises E739 ("file already exists") and that
+	-- aborts the whole plugin config. A missing vault falls back to the local
+	-- state directory so startup still finishes.
 	local cfg = config.options.bufferfiles and config.options.bufferfiles.dir
 	if cfg and cfg ~= "" then
 		local p = vim.fs.normalize(cfg)
-		vim.fn.mkdir(p, "p")
-		return p
+		if util.ensure_dir(p, { quiet = true }) then return p end
+		local fallback = default_root()
+		util.ensure_dir(fallback)
+		util.notify(
+			"Bufferfiles folder is not available (" .. p .. "). Using " .. fallback .. ".",
+			vim.log.levels.WARN
+		)
+		return fallback
 	end
 	local env_dir = vim.env.BUFFERFILES_DIR
 	if env_dir and env_dir ~= "" then
@@ -57,12 +67,12 @@ local function get_root_dir()
 		if st and st.type == "directory" then return p end
 	end
 	local p = default_root()
-	if uv.fs_stat(p) == nil then vim.fn.mkdir(p, "p") end
+	util.ensure_dir(p)
 	return p
 end
 
 local function ensure_dir(p)
-	if uv.fs_stat(p) == nil then vim.fn.mkdir(p, "p") end
+	if uv.fs_stat(p) == nil then util.ensure_dir(p) end
 end
 
 local function subdirs()

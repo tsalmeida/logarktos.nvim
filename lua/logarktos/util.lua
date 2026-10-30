@@ -187,12 +187,46 @@ function M.is_dir(path)
 	return st ~= nil and st.type == "directory"
 end
 
-function M.ensure_dir(path)
+--- A junction on `path` or one of its parents whose target is not a directory.
+--- Returns a message, or nil when the path is not blocked that way.
+--- fs_lstat sees the reparse point without following it. fs_stat then checks
+--- the target: an unplugged volume fails immediately, which is the E739 case
+--- (mkdir says the junction "already exists" and aborts the config).
+function M.unavailable_junction(path)
+	if not path or path == "" then return nil end
+	local norm = vim.fs.normalize(path)
+	local acc
+	for part in norm:gmatch("[^/]+") do
+		acc = acc and (acc .. "/" .. part) or part
+		if not acc:match("^%a:$") then
+			local lst = M.uv.fs_lstat(acc)
+			if lst and lst.type == "link" and not M.is_dir(acc) then
+				local target = M.uv.fs_readlink(acc)
+				local where = (type(target) == "string" and target ~= "") and (acc .. " -> " .. target) or acc
+				return "Folder is a junction whose target is not available: " .. where
+			end
+		end
+	end
+	return nil
+end
+
+function M.ensure_dir(path, opts)
+	opts = opts or {}
 	if not path or path == "" then return false end
+	local blocked = M.unavailable_junction(path)
+	if blocked then
+		if not opts.quiet then M.notify(blocked, vim.log.levels.ERROR) end
+		return false
+	end
 	if M.is_dir(path) then return true end
 	local ok, err = pcall(vim.fn.mkdir, path, "p")
 	if not ok then
-		M.notify("Could not create folder: " .. tostring(err), vim.log.levels.ERROR)
+		-- E739: the path (or an ancestor) already exists as a reparse point
+		-- that mkdir does not treat as a directory. A live target still counts.
+		if M.is_dir(path) then return true end
+		if not opts.quiet then
+			M.notify("Could not create folder: " .. tostring(err), vim.log.levels.ERROR)
+		end
 		return false
 	end
 	return true

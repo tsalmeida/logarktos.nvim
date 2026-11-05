@@ -34,4 +34,21 @@ Use the entry `id` from a Dispatcher's note if present. Do not pick up other Pen
 
 # Request
 
+## Current situation
 
+The live briefing for this project is the Current Situation field of its row in All My Projects (`L:\Vault\Obras\all-my-projects_package.sqlite`, column `longtext_3`). This row is titled "Logarktos.nvim" (id `58674`). Tiago almost never reads it. Models do. Read it at the start of work on this project. It is the mirror of what is happening, what is waiting, what to do next, and what the intended direction is.
+
+**Keep it true without asking.** Do not wait for confirmation. Do not open a second current-situation note with a new timestamp, and do not store a second copy of this briefing. Edit that field in place.
+
+When anything material changes, do both of these in the same turn:
+
+1. **Rewrite the present.** Change the snapshot and the do-now, waiting, and next lines so they match today. Delete or recast sentences that would be false if read tomorrow. A stale now line is a bug.
+2. **Add what is new.** Put new facts in the section they belong to. If a plan changes, replace the old plan. Do not leave two competing plans.
+
+**History.** Keep a short block of only what still explains the present. Move a fact there when it is no longer current but still explains a lock or a do-not-redo. Do not grow a diary. Detailed dated notes stay in their own files.
+
+Do not copy whole emails or whole prompts into it. Do not leave advice that was already decided.
+
+Write the field with one small `UPDATE` of `longtext_3`, commit immediately, and stamp `updated_at` (UTC, `YYYY-MM-DDTHH:MM:SS.000000Z`). Open a short-lived connection with pooling off. Re-read the row just before changing it. Never rewrite the database file wholesale. TKHN Sync carries the file.
+
+After editing, stamp **Last rewritten** at the top (the date, and the one-line reason).

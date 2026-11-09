@@ -514,6 +514,132 @@ local function cursor_row_for_buf(buf)
 	return nil
 end
 
+-- ── list panes (bookmarks, recent files) ─────────────────────────────────
+-- Prose windows use wrap + linebreak + breakindent. A list row is one path.
+-- linebreak will not split a token wider than the pane, and Neovim then draws
+-- that run past the WinSeparator: the text and its line background land on
+-- the neighbouring window. Triplicate paints the lists and *then* shrinks the
+-- side panes (large layout), so a name that fit the wide pane overflows the
+-- narrow one. Clip the row to the pane, and keep nowrap on while the list is
+-- showing so a resize that lands first still cannot paint across the split.
+-- Opening a real buffer in that window puts the prose options back.
+
+local list_refitters = {}
+local list_clip_au = false
+local list_clip_scheduled = false
+
+--- Text columns inside `win` (width minus number, sign, and fold columns).
+function M.window_text_cells(win)
+	if not win or win == 0 or not vim.api.nvim_win_is_valid(win) then return 40 end
+	local width = vim.api.nvim_win_get_width(win)
+	local info = vim.fn.getwininfo(win)
+	local textoff = (info[1] and info[1].textoff) or 0
+	local cells = width - textoff
+	if cells < 1 then return 1 end
+	return cells
+end
+
+--- Shorten `text` to `max_cells` display columns, keeping the tail.
+--- Highlight byte offsets (`hl_start` inclusive, `hl_end` exclusive) are
+--- shifted into the clipped string, or returned nil when the span is gone.
+--- @return string text, integer|nil hl_start, integer|nil hl_end
+function M.clip_display(text, max_cells, hl_start, hl_end)
+	text = text or ""
+	if not max_cells or max_cells < 1 then max_cells = 1 end
+	if vim.fn.strdisplaywidth(text) <= max_cells then
+		return text, hl_start, hl_end
+	end
+	local ellipsis = "…"
+	local ellipsis_cells = vim.fn.strdisplaywidth(ellipsis)
+	local ellipsis_bytes = #ellipsis
+	if ellipsis_cells >= max_cells then
+		return ellipsis, nil, nil
+	end
+	local budget = max_cells - ellipsis_cells
+	local chars = vim.fn.strchars(text)
+	local lo, hi = 0, chars
+	while lo < hi do
+		local mid = math.floor((lo + hi) / 2)
+		if vim.fn.strdisplaywidth(vim.fn.strcharpart(text, mid)) <= budget then
+			hi = mid
+		else
+			lo = mid + 1
+		end
+	end
+	local tail = vim.fn.strcharpart(text, lo)
+	local removed = #text - #tail
+	local clipped = ellipsis .. tail
+	if hl_start == nil or hl_end == nil then
+		return clipped, nil, nil
+	end
+	local ns = hl_start - removed + ellipsis_bytes
+	local ne = hl_end - removed + ellipsis_bytes
+	if ne <= ellipsis_bytes or ns >= #clipped then
+		return clipped, nil, nil
+	end
+	if ns < ellipsis_bytes then ns = ellipsis_bytes end
+	if ne > #clipped then ne = #clipped end
+	if ne <= ns then return clipped, nil, nil end
+	return clipped, ns, ne
+end
+
+function M.apply_list_window(win)
+	if not win or not vim.api.nvim_win_is_valid(win) then return end
+	local opt = { scope = "local", win = win }
+	vim.api.nvim_set_option_value("wrap", false, opt)
+	vim.api.nvim_set_option_value("linebreak", false, opt)
+	vim.api.nvim_set_option_value("breakindent", false, opt)
+	vim.api.nvim_set_option_value("showbreak", "", opt)
+	vim.w[win].logarktos_list_clip = true
+end
+
+function M.restore_prose_window(win)
+	if not win or not vim.api.nvim_win_is_valid(win) then return end
+	for _, name in ipairs({ "wrap", "linebreak", "breakindent", "showbreak" }) do
+		local global = vim.api.nvim_get_option_value(name, { scope = "global" })
+		vim.api.nvim_set_option_value(name, global, { scope = "local", win = win })
+	end
+	vim.w[win].logarktos_list_clip = false
+end
+
+--- `fn(win, buf)` runs after a list window is resized (one coalesced pass).
+function M.on_list_refit(filetype, fn)
+	list_refitters[filetype] = fn
+	if list_clip_au then return end
+	list_clip_au = true
+	local grp = vim.api.nvim_create_augroup("LogarktosListClip", { clear = true })
+	vim.api.nvim_create_autocmd("WinResized", {
+		group = grp,
+		callback = function()
+			if list_clip_scheduled then return end
+			list_clip_scheduled = true
+			vim.schedule(function()
+				list_clip_scheduled = false
+				for _, win in ipairs(vim.api.nvim_list_wins()) do
+					local buf = vim.api.nvim_win_get_buf(win)
+					local refit = list_refitters[vim.bo[buf].filetype]
+					if refit then refit(win, buf) end
+				end
+			end)
+		end,
+	})
+	vim.api.nvim_create_autocmd("BufWinEnter", {
+		group = grp,
+		callback = function(ev)
+			local buf = ev.buf
+			if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+			local list = M.is_list_panel(buf)
+			for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+				if list then
+					M.apply_list_window(win)
+				elseif vim.w[win].logarktos_list_clip then
+					M.restore_prose_window(win)
+				end
+			end
+		end,
+	})
+end
+
 --- True for list panels that are not themselves editable content (bookmark /
 --- recent-file lists). Layouts must open the *selected* path instead of
 --- cloning these buffers into Triple/Dual/Work/etc.

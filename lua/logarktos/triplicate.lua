@@ -77,6 +77,12 @@ function M.open(opts)
 		vim.api.nvim_set_current_win(left_win)
 	end
 
+	-- Lists were filled at the pre-resize widths. A long filename that fit
+	-- then overflows the narrower pane and paints through the split. Refit
+	-- now, while the widths are final; WinResized covers later drags.
+	require("logarktos.bookmarks").refit(middle_win)
+	require("logarktos.recentfiles").refit(right_win)
+
 	tabs.auto_name(nil, { layout = "triplicate", dir = dir })
 	-- Let a per-window colorscheme (chromaki's spotlight) re-resolve the inactive
 	-- panes once they're all built; mirrors layouts.lua's announce_layout_built()

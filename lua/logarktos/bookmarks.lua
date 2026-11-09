@@ -394,10 +394,11 @@ function render(buf, force)
 		for _, item in ipairs(items) do
 			local prefix = "  " .. get_icon(item.path, is_folders) .. " "
 			table.insert(display_lines, prefix .. item.display)
+			local span = item.hl_end and item.hl_end > (item.hl_start or 0)
 			table.insert(meta, {
 				path = item.path,
-				hl_start = item.hl_start and (item.hl_start + #prefix) or nil,
-				hl_end = item.hl_end and (item.hl_end + #prefix) or nil,
+				hl_start = span and ((item.hl_start or 0) + #prefix) or nil,
+				hl_end = span and (item.hl_end + #prefix) or nil,
 			})
 		end
 		return true
@@ -417,14 +418,34 @@ function render(buf, force)
 		}
 		meta = {}
 	end
+
+	-- Clip after the row is fully built (icon + path). The cached entry keeps
+	-- the full display, so a later widen (WinResized / refit) can restore it.
+	local win = vim.fn.bufwinid(buf)
+	local max_cells = (win ~= -1) and util.window_text_cells(win) or 40
+	for i, line in ipairs(display_lines) do
+		local item = meta[i]
+		local hs, he
+		if type(item) == "table" and item.hl_end and item.hl_end > (item.hl_start or 0) then
+			hs = item.hl_start or 0
+			he = item.hl_end
+		end
+		local clipped, nhs, nhe = util.clip_display(line, max_cells, hs, he)
+		display_lines[i] = clipped
+		if type(item) == "table" and item.path then
+			item.hl_start = nhs
+			item.hl_end = nhe
+		end
+	end
+
 	vim.bo[buf].modifiable = true
 	vim.bo[buf].readonly = false
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
 	vim.b[buf].bookmark_meta = meta
 	vim.api.nvim_buf_clear_namespace(buf, highlight_ns, 0, -1)
 	for idx, item in ipairs(meta) do
-		if item and item.hl_start and item.hl_end and item.hl_end > item.hl_start then
-			vim.api.nvim_buf_add_highlight(buf, highlight_ns, highlight_group, idx - 1, item.hl_start, item.hl_end)
+		if type(item) == "table" and item.hl_end and item.hl_end > (item.hl_start or 0) then
+			vim.api.nvim_buf_add_highlight(buf, highlight_ns, highlight_group, idx - 1, item.hl_start or 0, item.hl_end)
 		end
 	end
 	vim.bo[buf].modifiable = false
@@ -500,13 +521,19 @@ end
 
 local function open_in_window(win)
 	local buf = vim.api.nvim_create_buf(false, true)
+	prepare_buffer(buf)
 	vim.api.nvim_win_set_buf(win, buf)
-	vim.api.nvim_set_option_value("wrap", true, { scope = "local", win = win })
-	vim.api.nvim_set_option_value("linebreak", true, { scope = "local", win = win })
-	vim.api.nvim_set_option_value("breakindent", true, { scope = "local", win = win })
-	vim.api.nvim_set_option_value("showbreak", "↪ ", { scope = "local", win = win })
+	util.apply_list_window(win)
 	configure_buffer(buf)
 	return buf
+end
+
+function M.refit(win, buf)
+	if not win or not vim.api.nvim_win_is_valid(win) then return end
+	buf = buf or vim.api.nvim_win_get_buf(win)
+	if not vim.api.nvim_buf_is_valid(buf) then return end
+	if vim.bo[buf].filetype ~= "logarktos_bookmarklist" then return end
+	render(buf, false)
 end
 
 function M.bookmark_list(opts)
@@ -529,5 +556,9 @@ function M.bookmark_list_in_window(win)
 	vim.api.nvim_set_current_win(win)
 	return open_in_window(win)
 end
+
+util.on_list_refit("logarktos_bookmarklist", function(win, buf)
+	M.refit(win, buf)
+end)
 
 return M

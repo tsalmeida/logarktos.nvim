@@ -1,5 +1,6 @@
 -- logarktos/recentfiles.lua ── a panel of recently-modified files under a dir
 local config = require("logarktos.config")
+local util = require("logarktos.util")
 
 local M = {}
 local uv = vim.uv or vim.loop
@@ -238,6 +239,49 @@ local function configure_keymaps(buf)
 	vim.keymap.set("n", "q", function() vim.cmd("close") end, opts)
 end
 
+-- Full rows live on the buffer. The window shows a clipped copy so a later
+-- resize can put the tail back instead of clipping a line that was already cut.
+local function paint(win, buf)
+	if not vim.api.nvim_win_is_valid(win) or not vim.api.nvim_buf_is_valid(buf) then return end
+	local full_lines = vim.b[buf].recentfiles_full_lines or {}
+	local items = vim.b[buf].recentfiles_items or {}
+	local header = vim.b[buf].recentfiles_header_lines or 0
+	local max_cells = util.window_text_cells(win)
+	local lines, spans = {}, {}
+	for i, line in ipairs(full_lines) do
+		local item = items[i - header]
+		local hs, he
+		if type(item) == "table" and item.hl_end and item.hl_end > (item.hl_start or 0) then
+			hs = item.hl_start or 0
+			he = item.hl_end
+		end
+		local clipped, nhs, nhe = util.clip_display(line, max_cells, hs, he)
+		lines[i] = clipped
+		spans[i] = { nhs, nhe }
+	end
+	local cursor = vim.api.nvim_win_get_cursor(win)
+	set_lines(buf, lines)
+	if cursor[1] > #lines then cursor[1] = math.max(1, #lines) end
+	local painted = lines[cursor[1]] or ""
+	if cursor[2] > #painted then cursor[2] = #painted end
+	pcall(vim.api.nvim_win_set_cursor, win, cursor)
+	ensure_highlight()
+	vim.api.nvim_buf_clear_namespace(buf, highlight_ns, 0, -1)
+	for i, span in ipairs(spans) do
+		if span[2] and span[2] > (span[1] or 0) then
+			vim.api.nvim_buf_add_highlight(buf, highlight_ns, highlight_group, i - 1, span[1] or 0, span[2])
+		end
+	end
+end
+
+function M.refit(win, buf)
+	if not win or not vim.api.nvim_win_is_valid(win) then return end
+	buf = buf or vim.api.nvim_win_get_buf(win)
+	if not vim.api.nvim_buf_is_valid(buf) then return end
+	if vim.bo[buf].filetype ~= "logarktos_recentfiles" then return end
+	paint(win, buf)
+end
+
 function M.list_in_window(win, opts)
 	opts = opts or {}
 	win = win or vim.api.nvim_get_current_win()
@@ -255,14 +299,9 @@ function M.list_in_window(win, opts)
 	local limit = opts.limit or cfg.limit or 20
 	local entries = gather_recent(dir, limit, opts)
 	local buf = vim.api.nvim_create_buf(false, true)
-	vim.api.nvim_win_set_buf(win, buf)
-
-	vim.api.nvim_set_option_value("wrap", true, { scope = "local", win = win })
-	vim.api.nvim_set_option_value("linebreak", true, { scope = "local", win = win })
-	vim.api.nvim_set_option_value("breakindent", true, { scope = "local", win = win })
-	vim.api.nvim_set_option_value("showbreak", "↪ ", { scope = "local", win = win })
-
 	prepare_buffer(buf)
+	vim.api.nvim_win_set_buf(win, buf)
+	util.apply_list_window(win)
 
 	local lines = {}
 	if #entries == 0 then
@@ -282,17 +321,14 @@ function M.list_in_window(win, opts)
 		vim.b[buf].recentfiles_header_lines = 2
 	end
 
-	set_lines(buf, lines)
-	ensure_highlight()
-	vim.api.nvim_buf_clear_namespace(buf, highlight_ns, 0, -1)
-	local header_lines = vim.b[buf].recentfiles_header_lines or 0
-	for idx, item in ipairs(vim.b[buf].recentfiles_items or {}) do
-		if item.hl_start and item.hl_end and item.hl_end > item.hl_start then
-			vim.api.nvim_buf_add_highlight(buf, highlight_ns, highlight_group, header_lines + idx - 1, item.hl_start, item.hl_end)
-		end
-	end
+	vim.b[buf].recentfiles_full_lines = lines
 	configure_keymaps(buf)
+	paint(win, buf)
 	return buf
 end
+
+util.on_list_refit("logarktos_recentfiles", function(win, buf)
+	M.refit(win, buf)
+end)
 
 return M

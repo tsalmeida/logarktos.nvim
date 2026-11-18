@@ -47,6 +47,7 @@ M.default_keymaps = {
 	new_markdown        = "<leader>nm",
 	markdown_archive    = "<leader>ma",
 	markdown_drafts     = "<leader>md",
+	join_markdown       = "<leader>jm",
 	organize            = "<leader>or",
 	organize_images     = "<leader>ri",
 	separate_duplicates = "<leader>sd",

@@ -93,6 +93,14 @@ local function actions()
 				MD().markdown_drafts()
 			end
 		end, "Draft current/selected Markdown file(s)" },
+		join_markdown       = { { "n", "x" }, function()
+			local mode = vim.api.nvim_get_mode().mode
+			if mode == "v" or mode == "V" or mode == "\22" then
+				MD().join_markdown({ line1 = vim.fn.line("v"), line2 = vim.fn.line(".") })
+			else
+				MD().join_markdown()
+			end
+		end, "Join selected text files into one Markdown note" },
 		organize            = { "n", function() ORG().organize() end, "Organize directory" },
 		organize_images     = { "n", function() ORG().organize_images() end, "Sort images" },
 		separate_duplicates = { "n", function() ORG().separate_duplicates() end, "Separate duplicates" },

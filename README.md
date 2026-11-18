@@ -242,6 +242,14 @@ that Oil directory's `archive/` folder.
 it files the current file — or the Oil entry / visual selection — into a
 `drafts/` subfolder, created if missing.
 
+`:LogarktosJoinMarkdown` (`<leader>jm` when default keymaps are on) runs from
+an Oil buffer. It concatenates the current entry, or a visual selection, into
+one new note in that same folder. Only `.md`, `.txt`, `.csv`, and `.tsv` are
+read; other selected entries are skipped silently. The name follows the note
+timestamp above: `YYYYMMDD - HHMMSS - Joined - n files.md` (or `1 file`).
+File bytes are copied in modified-time order, newest first, with nothing
+inserted between them. The Oil window you started in stays put.
+
 ### logarktos.lua
 
 - **Auto-backfill on read:** whenever an existing per-folder `logarktos.lua` is

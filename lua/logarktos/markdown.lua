@@ -417,4 +417,199 @@ function M.markdown_drafts(opts)
 	file_markdown(DRAFTS, opts)
 end
 
+-- ── Join selected text files ─────────────────────────────────────────────────
+-- Extensions accepted into a joined note. Anything else in the Oil selection
+-- is skipped with no message.
+local JOIN_EXTS = { md = true, txt = true, csv = true, tsv = true }
+
+local function is_joinable_name(name)
+	if type(name) ~= "string" then return false end
+	local ext = name:lower():match("%.([^%.\\/]+)$")
+	return ext ~= nil and JOIN_EXTS[ext] == true
+end
+
+--- Seconds and nanoseconds of the file's modified time (Windows "Date modified").
+local function mtime_parts(stat)
+	local m = stat and stat.mtime
+	if type(m) == "table" then
+		return tonumber(m.sec) or 0, tonumber(m.nsec) or 0
+	end
+	return tonumber(m) or 0, 0
+end
+
+--- Exact file bytes. No newline translation and no added trailing newline.
+local function read_bytes(path)
+	local fd, err = uv.fs_open(path, "r", 438)
+	if not fd then return nil, err end
+	local stat = uv.fs_fstat(fd)
+	local size = (stat and stat.size) or 0
+	if size == 0 then
+		uv.fs_close(fd)
+		return ""
+	end
+	local parts, got = {}, 0
+	while got < size do
+		local chunk, rerr = uv.fs_read(fd, size - got, got)
+		if not chunk or chunk == "" then
+			uv.fs_close(fd)
+			return nil, rerr or "short read"
+		end
+		parts[#parts + 1] = chunk
+		got = got + #chunk
+	end
+	uv.fs_close(fd)
+	return table.concat(parts)
+end
+
+local function write_bytes(path, data)
+	local fd, err = uv.fs_open(path, "w", 438)
+	if not fd then return false, err end
+	local pos = 1
+	while pos <= #data do
+		local n, werr = uv.fs_write(fd, data:sub(pos), -1)
+		if not n or n < 1 then
+			uv.fs_close(fd)
+			return false, werr or "write failed"
+		end
+		pos = pos + n
+	end
+	uv.fs_close(fd)
+	return true
+end
+
+local function focus_joined(win, name)
+	if not vim.api.nvim_win_is_valid(win) then return end
+	if vim.api.nvim_get_current_win() ~= win then
+		vim.api.nvim_set_current_win(win)
+	end
+	util.oil_focus_entry(name, win)
+end
+
+--- Join the Oil selection into one new note in that same folder.
+--- Accepts .md, .txt, .csv, and .tsv. Other selected entries are ignored.
+--- Bytes are copied in modified-time order, newest first, with nothing
+--- inserted between files. The invoking Oil window stays the current window.
+function M.join_markdown(opts)
+	local win = vim.api.nvim_get_current_win()
+	local buf = vim.api.nvim_win_get_buf(win)
+	if vim.bo[buf].filetype ~= "oil" then
+		util.notify("JoinMarkdown runs from an Oil buffer.", vim.log.levels.WARN, "JoinMarkdown")
+		return
+	end
+
+	local dir = util.oil_dir(buf)
+	if not dir or dir == "" then
+		util.notify("Oil directory is unknown.", vim.log.levels.WARN, "JoinMarkdown")
+		return
+	end
+
+	local oil = util.oil()
+	if not oil or not oil.get_entry_on_line then
+		util.notify("Oil entry API is unavailable.", vim.log.levels.ERROR, "JoinMarkdown")
+		return
+	end
+
+	local line1, line2 = oil_line_range(opts)
+	local files, seen = {}, {}
+	for lnum = line1, line2 do
+		local ok_entry, entry = pcall(oil.get_entry_on_line, buf, lnum)
+		if not ok_entry then entry = nil end
+		local typ = entry and entry.type
+		if entry and (typ == "file" or typ == "link") and is_joinable_name(entry.name) then
+			local path = util.join(dir, entry.name)
+			local norm = util.normalize(path)
+			if norm and not seen[norm] then
+				local stat = uv.fs_stat(path)
+				if stat and stat.type == "file" then
+					seen[norm] = true
+					local sec, nsec = mtime_parts(stat)
+					files[#files + 1] = {
+						path = path,
+						name = entry.name,
+						sec = sec,
+						nsec = nsec,
+					}
+				end
+			end
+		end
+	end
+
+	if #files == 0 then
+		util.notify(
+			"No markdown, text, csv, or tsv files selected.",
+			vim.log.levels.WARN,
+			"JoinMarkdown"
+		)
+		return
+	end
+
+	table.sort(files, function(a, b)
+		if a.sec ~= b.sec then return a.sec > b.sec end
+		if a.nsec ~= b.nsec then return a.nsec > b.nsec end
+		local an, bn = a.name:lower(), b.name:lower()
+		if an ~= bn then return an < bn end
+		return false
+	end)
+
+	local chunks, failed = {}, {}
+	for _, file in ipairs(files) do
+		local data, err = read_bytes(file.path)
+		if data == nil then
+			failed[#failed + 1] = file.name .. ": " .. tostring(err or "could not read")
+		else
+			chunks[#chunks + 1] = data
+		end
+	end
+
+	if #chunks == 0 then
+		util.notify(
+			"Could not read the selected files:\n" .. table.concat(failed, "\n"),
+			vim.log.levels.WARN,
+			"JoinMarkdown"
+		)
+		return
+	end
+
+	local n = #chunks
+	local noun = (n == 1) and "file" or "files"
+	local stamp = os.date(config.options.markdown.timestamp or "%Y%m%d - %H%M%S")
+	local filename = ("%s - Joined - %d %s.md"):format(stamp, n, noun)
+	local path = util.unique_path(util.join(dir, filename))
+	local body = table.concat(chunks, "")
+	local ok, err = write_bytes(path, body)
+	if not ok then
+		util.notify(
+			"Could not write joined file: " .. tostring(err or "unknown error"),
+			vim.log.levels.ERROR,
+			"JoinMarkdown"
+		)
+		return
+	end
+
+	-- Same window the command was invoked from. Do not open the new file:
+	-- opening it would be a buffer swap, and any other window heuristic is wrong.
+	if vim.api.nvim_win_is_valid(win) and vim.api.nvim_get_current_win() ~= win then
+		vim.api.nvim_set_current_win(win)
+	end
+	util.refresh_oil()
+	local created = vim.fs.basename(path)
+	vim.schedule(function()
+		focus_joined(win, created)
+		vim.defer_fn(function()
+			focus_joined(win, created)
+		end, 80)
+	end)
+
+	local msg = ("Joined %d %s into %s"):format(n, noun, created)
+	if #failed > 0 then
+		util.notify(
+			("%s; %d unreadable:\n%s"):format(msg, #failed, table.concat(failed, "\n")),
+			vim.log.levels.WARN,
+			"JoinMarkdown"
+		)
+	else
+		util.notify(msg, vim.log.levels.INFO, "JoinMarkdown")
+	end
+end
+
 return M

@@ -26,6 +26,8 @@ Some of the basic ideas:
 
 9. Resizing buffers with the use of the directional arrow keys.
 
+*include_attachment* "L:/Vault/Documents/Others/Every-prompt.md"
+
 # After the work
 
 After implementing the requested changes, write a brief report into Autarktos (`L:\Library\Coding\project-ai-prompts_package.sqlite`) on the entry this prompt came from: put it in `longtext_2` (the commit message is fine) and set `datapoint_4` to one of GPT, Grok, Claude, Gemini, Other, according to which model family processed this prompt.
